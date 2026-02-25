@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 import logging
 
-from .chat import Chat, ChatManager
+from ..cli.chat import Chat, ChatManager
 from .message import user_message, agent_message, tool_message
 
 # Configure logging

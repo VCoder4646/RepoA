@@ -1,4 +1,4 @@
-# Finance Agent System Requirements
+# RepoA Agent System Requirements
 # Python 3.8+
 
 # Core dependencies

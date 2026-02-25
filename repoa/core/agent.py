@@ -10,8 +10,8 @@ import json
 import logging
 from pathlib import Path
 
-from .system_prompt import SystemPrompt
-from .tools_pro import ToolProcessor, Tool, ToolType
+from ..config.system_prompt import SystemPrompt
+from ..tools.tools_pro import ToolProcessor, Tool, ToolType
 
 # Configure logging
 logger = logging.getLogger(__name__)

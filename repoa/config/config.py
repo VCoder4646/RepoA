@@ -35,7 +35,7 @@ class Config:
     EXPORTS_DIR = BASE_DIR / "exports"
     
     # Agent defaults
-    DEFAULT_AGENT_NAME = os.getenv("DEFAULT_AGENT_NAME", "FinanceAgent")
+    DEFAULT_AGENT_NAME = os.getenv("DEFAULT_AGENT_NAME", "RepoA Agent")
     DEFAULT_TEMPERATURE = float(os.getenv("DEFAULT_TEMPERATURE", "0.7"))
     DEFAULT_MAX_ITERATIONS = int(os.getenv("DEFAULT_MAX_ITERATIONS", "10"))
     DEFAULT_TIMEOUT = int(os.getenv("DEFAULT_TIMEOUT", "300"))

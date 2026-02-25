@@ -451,9 +451,9 @@ System prompt management with templating.
 - `SystemPromptLibrary`: Manage multiple prompts
 
 **Default Prompts:**
-- `finance_agent`: Financial analysis specialist
 - `general_assistant`: General purpose assistant
 - `data_analyst`: Data analysis specialist
+- `code_assistant`: Code analysis and development specialist
 
 **Features:**
 - Variable substitution: `{variable_name}`

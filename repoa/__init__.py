@@ -1,28 +1,25 @@
 """
-Finance Agent System
+RepoA Agent System
 A structured agent system with system prompts, MCP tools integration,
 memory management, and comprehensive logging.
 """
 
 __version__ = "2.1.0"
-__author__ = "Finance Agent Team"
+__author__ = "VCoder4646"
 
 # Import main classes for easy access
-from .agent import (
+from .core.agent import (
     Agent,
     AgentBuilder,
     AgentConfig,
     create_agent
 )
-from .llm_client import (
-    OllamaClient,
-    VLLMClient,
-    RemoteEndpointClient
+
+from .config.system_prompt import (
+    SystemPrompt
 )
 
-from .system_prompt import SystemPrompt
-
-from .tools_pro import (
+from .tools.tools_pro import (
     Tool,
     ToolParameter,
     ToolProcessor,
@@ -30,12 +27,12 @@ from .tools_pro import (
     create_custom_tool
 )
 
-from .config import Config
-from .utils import setup_logging, load_json, save_json
+from .config.config import Config
+from .tools.utils import setup_logging, load_json, save_json
 
 # Import memory classes (optional - will be None if not available)
 try:
-    from .memory import (
+    from .core.memory import (
         Memory,
         MemoryConfig,
         create_memory,
@@ -53,7 +50,7 @@ except ImportError:
 
 # Import chat classes (optional)
 try:
-    from .chat import Chat, ChatManager
+    from .cli.chat import Chat, ChatManager
     CHAT_AVAILABLE = True
 except ImportError:
     Chat = None
@@ -66,11 +63,6 @@ __all__ = [
     "AgentBuilder",
     "AgentConfig",
     "create_agent",
-    
-    # LLM client classes
-    "OllamaClient",
-    "VLLMClient",
-    "RemoteEndpointClient",
     
     # System prompt classes
     "SystemPrompt",
@@ -106,7 +98,7 @@ __all__ = [
 
 
 def get_version():
-    """Get the current version of the Finance Agent System."""
+    """Get the current version of the RepoA Agent System."""
     return __version__
 
 
@@ -116,18 +108,18 @@ def quick_start():
     Prints basic usage information.
     """
     print(f"""
-Finance Agent System v{__version__}
+RepoA Agent System v{__version__}
 {'=' * 50}
 
 Quick Start:
 
 1. Create a basic agent:
    from agent import create_agent
-   agent = create_agent("MyAgent", "finance_agent")
+   agent = create_agent("MyAgent", "repoa")
 
 2. Use agent builder:
    from agent import AgentBuilder
-   agent = AgentBuilder().with_name("Agent").build()
+   agent = AgentBuilder().with_name("Agent").with_default_prompt("general_assistant").build()
 
 3. Add custom tools:
    from tools_pro import create_custom_tool
@@ -157,11 +149,11 @@ Quick Start:
    result = agent.invoke("What's the weather?")
 
 New Features:
-* invoke() method - Flexible agent invocation (3 modes)
-* Comprehensive logging - Agent and memory operations
-* Auto-save chat - Session persistence
-* Memory module - Smart conversation management
-* KV cache tracking - Cost optimization
+✨ invoke() method - Flexible agent invocation (3 modes)
+📝 Comprehensive logging - Agent and memory operations
+💾 Auto-save chat - Session persistence
+🧠 Memory module - Smart conversation management
+📊 KV cache tracking - Cost optimization
 
 Documentation:
 - README.md - Overview and quick reference
@@ -181,4 +173,4 @@ Examples:
 
 
 # Print version on import (optional - can be removed if not desired)
-# print(f"Finance Agent System v{__version__} loaded")
+# print(f"RepoA Agent System v{__version__} loaded")
