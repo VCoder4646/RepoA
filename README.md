@@ -46,15 +46,32 @@ A comprehensive, modular agent system with **Memory management**, **KV cache opt
 ## 📁 Project Structure
 
 ```
-├── agent.py                          # Agent system with Memory integration
-├── memory.py                         # Memory management with KV cache
-├── chat.py                           # Chat session management
-├── message.py                        # Message types and formatting
-├── system_prompt.py                  # System prompt management
-├── tools_pro.py                      # Tool processing and validation
-├── llm_client.py                     # LLM clients with cache tracking
-├── config.py                         # Configuration settings
-├── utils.py                          # Utility functions
+repoa/                             # Python package
+├── __init__.py
+├── cli/
+│   ├── __init__.py
+│   └── chat.py                     # CLI / chat utilities
+├── config/
+│   ├── __init__.py
+│   ├── config.py                   # Project configuration helpers
+│   └── system_prompt.py            # System prompt templates and helpers
+├── core/
+│   ├── __init__.py
+│   ├── agent.py                    # Agent implementation and builder
+│   ├── llm_client.py               # LLM client wrappers (Ollama, etc.)
+│   ├── memory.py                   # Memory manager and KV cache tracking
+│   └── message.py                  # Message types and formatting
+├── tools/
+│   ├── __init__.py
+│   ├── tools_pro.py                # Tool processing, validators, MCP support
+│   └── utils.py                    # Tool/util helpers
+examples/
+└── sample.py                       # Example usage and quickstart
+
+Top-level files:
+- `pyproject.toml` / `setup.py`     # Packaging & build
+- `requirements.txt`                # Python dependencies
+- `README.md`                       # This file
 ```
 
 ## 🔧 Installation
@@ -693,15 +710,6 @@ Comprehensive guides available:
 - **INVOKE_METHOD_DOCS.md**: invoke() method documentation (3 modes)
 - **IMPLEMENTATION_SUMMARY.md**: invoke() implementation details
 
-### Quick Reference
-
-| Feature | Documentation | Example |
-|---------|--------------|----------|
-| Agent Logging | [AGENT_LOGGING_DOCS.md](AGENT_LOGGING_DOCS.md) | [example_agent_logging.py](example_agent_logging.py) |
-| Memory Logging | [MEMORY_LOGGING_DOCS.md](MEMORY_LOGGING_DOCS.md) | [example_memory_logging.py](example_memory_logging.py) |
-| invoke() Method | [INVOKE_METHOD_DOCS.md](INVOKE_METHOD_DOCS.md) | [example_invoke.py](example_invoke.py) |
-| KV Cache | [KV_CACHE_GUIDE.md](KV_CACHE_GUIDE.md) | [example_kv_cache_usage.py](example_kv_cache_usage.py) |
-| Agent Integration | [AGENT_CACHE_GUIDE.md](AGENT_CACHE_GUIDE.md) | [example_agent_comprehensive.py](example_agent_comprehensive.py) |
 
 ## 🏗️ Architecture
 
@@ -785,21 +793,6 @@ To extend this system:
 ## 📄 License
 
 This project is provided as-is for educational and development purposes.
-
-## 🙋 Support
-
-For questions or issues:
-
-1. Check the comprehensive examples directory
-2. Review the documentation guides:
-   - [AGENT_LOGGING_DOCS.md](AGENT_LOGGING_DOCS.md) - Logging configuration
-   - [MEMORY_LOGGING_DOCS.md](MEMORY_LOGGING_DOCS.md) - Memory logging
-   - [INVOKE_METHOD_DOCS.md](INVOKE_METHOD_DOCS.md) - invoke() method
-   - [KV_CACHE_GUIDE.md](KV_CACHE_GUIDE.md) - Cache optimization
-   - [AGENT_CACHE_GUIDE.md](AGENT_CACHE_GUIDE.md) - Agent integration
-3. Examine docstrings in each module
-4. Run the example scripts to understand expected behavior
-
 
 
 **Version**: 2.1.0  
