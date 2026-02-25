@@ -1,8 +1,7 @@
-# Finance Agent System v2.0
 
 A comprehensive, modular agent system with **Memory management**, **KV cache optimization**, and **cost-efficient LLM integration**.
 
-## 🚀 What's New in v2.0
+## 🚀 What's New in v1.0
 
 - **Memory System**: Smart conversation management with automatic persistence
 - **KV Cache Tracking**: Monitor and optimize LLM cache usage for cost savings
@@ -31,7 +30,6 @@ A comprehensive, modular agent system with **Memory management**, **KV cache opt
 ## 📁 Project Structure
 
 ```
-Finance_Agent/
 ├── agent.py                          # Agent system with Memory integration
 ├── memory.py                         # Memory management with KV cache
 ├── chat.py                           # Chat session management
@@ -41,19 +39,6 @@ Finance_Agent/
 ├── llm_client.py                     # LLM clients with cache tracking
 ├── config.py                         # Configuration settings
 ├── utils.py                          # Utility functions
-│
-├── test/
-│   ├── example_memory_integration.py # Memory system examples
-│   ├── example_chat_integration.py   # Chat & Message examples
-│   ├── example_agent_comprehensive.py # Complete agent examples
-│   ├── example_kv_cache_usage.py     # KV cache examples
-│   ├── sample.py                     # Quick start samples
-│   ├── test_kv_cache_integration.py  # KV cache tests
-│   └── test_agent_with_cache.py      # Agent integration tests
-│
-└── docs/
-    ├── KV_CACHE_GUIDE.md             # KV cache optimization guide
-    └── AGENT_CACHE_GUIDE.md          # Agent cache integration guide
 ```
 
 ## 🔧 Installation
@@ -597,10 +582,7 @@ Future enhancements:
 
 ---
 
-**Version**: 2.0  
-**Last Updated**: 2024-02-24  
+**Version**: 1.0  
+**Last Updated**: 2026-02-24  
 **Requirements**: Python 3.8+
 
-For detailed technical documentation, see:
-- [KV Cache Guide](KV_CACHE_GUIDE.md)
-- [Agent Cache Guide](AGENT_CACHE_GUIDE.md)
