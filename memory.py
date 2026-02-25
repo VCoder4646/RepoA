@@ -10,8 +10,8 @@ from pathlib import Path
 import json
 import logging
 
-from chat import Chat, ChatManager
-from message import user_message, agent_message, tool_message
+from .chat import Chat, ChatManager
+from .message import user_message, agent_message, tool_message
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -708,7 +708,7 @@ def create_memory(
     )
 
 
-def load_memory(session_id: str, storage_dir: str = "./memory_sessions") -> Memory:
+def load_memory(session_id: str, storage_dir: str = "") -> Memory:
     """
     Load a memory session from disk.
     

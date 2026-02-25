@@ -8,20 +8,21 @@ __version__ = "2.1.0"
 __author__ = "Finance Agent Team"
 
 # Import main classes for easy access
-from agent import (
+from .agent import (
     Agent,
     AgentBuilder,
     AgentConfig,
     create_agent
 )
-
-from system_prompt import (
-    SystemPrompt,
-    SystemPromptLibrary,
-    create_default_prompt
+from .llm_client import (
+    OllamaClient,
+    VLLMClient,
+    RemoteEndpointClient
 )
 
-from tools_pro import (
+from .system_prompt import SystemPrompt
+
+from .tools_pro import (
     Tool,
     ToolParameter,
     ToolProcessor,
@@ -29,12 +30,12 @@ from tools_pro import (
     create_custom_tool
 )
 
-from config import Config
-from utils import setup_logging, load_json, save_json
+from .config import Config
+from .utils import setup_logging, load_json, save_json
 
 # Import memory classes (optional - will be None if not available)
 try:
-    from memory import (
+    from .memory import (
         Memory,
         MemoryConfig,
         create_memory,
@@ -52,7 +53,7 @@ except ImportError:
 
 # Import chat classes (optional)
 try:
-    from chat import Chat, ChatManager
+    from .chat import Chat, ChatManager
     CHAT_AVAILABLE = True
 except ImportError:
     Chat = None
@@ -66,10 +67,13 @@ __all__ = [
     "AgentConfig",
     "create_agent",
     
+    # LLM client classes
+    "OllamaClient",
+    "VLLMClient",
+    "RemoteEndpointClient",
+    
     # System prompt classes
     "SystemPrompt",
-    "SystemPromptLibrary",
-    "create_default_prompt",
     
     # Tool classes
     "Tool",
@@ -123,7 +127,7 @@ Quick Start:
 
 2. Use agent builder:
    from agent import AgentBuilder
-   agent = AgentBuilder().with_name("Agent").with_default_prompt("general_assistant").build()
+   agent = AgentBuilder().with_name("Agent").build()
 
 3. Add custom tools:
    from tools_pro import create_custom_tool
@@ -153,11 +157,11 @@ Quick Start:
    result = agent.invoke("What's the weather?")
 
 New Features:
-✨ invoke() method - Flexible agent invocation (3 modes)
-📝 Comprehensive logging - Agent and memory operations
-💾 Auto-save chat - Session persistence
-🧠 Memory module - Smart conversation management
-📊 KV cache tracking - Cost optimization
+* invoke() method - Flexible agent invocation (3 modes)
+* Comprehensive logging - Agent and memory operations
+* Auto-save chat - Session persistence
+* Memory module - Smart conversation management
+* KV cache tracking - Cost optimization
 
 Documentation:
 - README.md - Overview and quick reference

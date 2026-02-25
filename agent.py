@@ -10,8 +10,8 @@ import json
 import logging
 from pathlib import Path
 
-from system_prompt import SystemPrompt
-from tools_pro import ToolProcessor, Tool, ToolType
+from .system_prompt import SystemPrompt
+from .tools_pro import ToolProcessor, Tool, ToolType
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -46,8 +46,8 @@ def set_agent_logging_level(level: int) -> None:
 
 # Conditional import for Chat and Message (core dependencies)
 try:
-    from chat import Chat, ChatManager
-    from message import Message, user_message, agent_message, tool_message
+    from .chat import Chat, ChatManager
+    from .message import Message, user_message, agent_message, tool_message
     CHAT_AVAILABLE = True
 except ImportError:
     Chat = None
@@ -57,7 +57,7 @@ except ImportError:
 
 # Conditional import for LLM client (optional dependency)
 try:
-    from llm_client import BaseLLMClient, LLMResponse, format_tools_for_api, parse_tool_call_arguments
+    from .llm_client import BaseLLMClient, LLMResponse, format_tools_for_api, parse_tool_call_arguments
     LLM_AVAILABLE = True
 except ImportError:
     BaseLLMClient = None
@@ -66,7 +66,7 @@ except ImportError:
 
 # Conditional import for Memory (optional dependency)
 try:
-    from memory import Memory, create_memory
+    from .memory import Memory, create_memory
     MEMORY_AVAILABLE = True
 except ImportError:
     Memory = None
@@ -139,7 +139,7 @@ class AgentConfig:
         
         # Configure memory logging
         if self.enable_memory_logging and MEMORY_AVAILABLE:
-            from memory import set_memory_logging_level
+            from .memory import set_memory_logging_level
             set_memory_logging_level(self.memory_log_level)
             
             # Add file handler for memory logging if specified
@@ -224,7 +224,7 @@ class Agent:
         
         # Apply memory logging configuration if memory is provided
         if self.memory and self.config.enable_memory_logging and MEMORY_AVAILABLE:
-            from memory import set_memory_logging_level
+            from .memory import set_memory_logging_level
             set_memory_logging_level(self.config.memory_log_level)
         
         logger.info(f"Initializing agent: name='{agent_name}', id={self.agent_id[:8]}..., tools={len(tools_processor)}")
@@ -593,7 +593,7 @@ class Agent:
         
         # Apply memory logging configuration
         if self.config.enable_memory_logging:
-            from memory import set_memory_logging_level
+            from .memory import set_memory_logging_level
             set_memory_logging_level(self.config.memory_log_level)
             logger.debug(f"[{self.agent_id[:8]}] Memory logging configured: level={logging.getLevelName(self.config.memory_log_level)}")
         

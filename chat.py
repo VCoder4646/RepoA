@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 
-from message import Message, Role, system_message, user_message, agent_message, tool_message
+from .message import Message, Role, system_message, user_message, agent_message, tool_message
 
 
 class Chat:
