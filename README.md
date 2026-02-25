@@ -71,7 +71,7 @@ A comprehensive, modular agent system with **Memory management**, **KV cache opt
 ### 1. Basic Agent
 
 ```python
-from agent import create_agent
+from repoa.core.agent import create_agent
 
 # Quick agent creation
 agent = create_agent(
@@ -82,11 +82,57 @@ agent = create_agent(
 print(agent.get_agent_info())
 ```
 
+### Programmatic Example (from examples/sample.py)
+
+This short example shows how to create an agent, register a simple custom tool, and invoke the agent programmatically. The full runnable example is available at `examples/sample.py`.
+
+```python
+from repoa.core.agent import create_agent, AgentConfig
+from repoa.config.system_prompt import SystemPrompt
+from repoa.tools.tools_pro import Tool, ToolType, ToolProcessor, ToolParameter
+from repoa.core.llm_client import OllamaClient
+
+sp = SystemPrompt("repoa", "Create an agent that can analyze stock data and provide investment advice.")
+tools_orchestrator = ToolProcessor()
+
+# Example: add a simple custom tool (mock implementation)
+tools_orchestrator.add_tool(
+    Tool(
+        name="stock_price_analyzer",
+        description="Analyze stock data and provide investment advice",
+        parameters=[
+            ToolParameter(
+                name="stock_symbol",
+                type="string",
+                description="Stock ticker symbol (e.g., AAPL)",
+                required=True
+            )
+        ],
+        tool_type=ToolType.CUSTOM,
+        function=lambda stock_symbol: f"price of {stock_symbol}: $150 (mock data)"
+    )
+)
+
+config = AgentConfig(auto_save_chat=True)
+llm = OllamaClient(model_name="qwen2.5:3b")
+agent = create_agent(name="TestAgent", system_prompt=sp, tools_processor=tools_orchestrator, llm_client=llm, config=config)
+
+print(agent.invoke("What is the AAPL Stock price right now?"))
+print(agent.get_agent_info())
+```
+
+Run the shipped example with:
+
+```bash
+pip install -r requirements.txt
+python examples/sample.py
+```
+
 ### 2. Agent with Logging and Auto-Save
 
 ```python
 import logging
-from agent import create_agent, AgentConfig
+from repoa.core.agent import create_agent, AgentConfig
 
 # Configure with logging and auto-save
 config = AgentConfig(
@@ -114,10 +160,10 @@ agent = create_agent(
 ### 3. Agent with Memory
 
 ```python
-from agent import Agent
-from system_prompt import SystemPrompt
-from tools_pro import ToolProcessor
-from memory import Memory, MemoryConfig
+from repoa.core.agent import Agent
+from repoa.config.system_prompt import SystemPrompt
+from repoa.tools.tools_pro import ToolProcessor
+from repoa.core.memory import Memory, MemoryConfig
 
 # Create memory
 memory = Memory(
@@ -148,7 +194,7 @@ agent.save_memory()
 ### 4. Agent with Tools
 
 ```python
-from tools_pro import create_custom_tool
+from repoa.tools.tools_pro import create_custom_tool
 
 # Create custom tool
 calc_tool = create_custom_tool(
@@ -185,8 +231,8 @@ print(result['result']['result'])  # 50
 The `invoke()` method provides a flexible interface for agent interaction with three modes:
 
 ```python
-from agent import create_agent
-from llm_client import OllamaClient
+from repoa.core.agent import create_agent
+from repoa.core.llm_client import OllamaClient
 
 agent = create_agent("MyAgent")
 agent.set_llm_client(OllamaClient(model_name="llama2"))
@@ -220,8 +266,8 @@ print(f"Tokens: {result['tokens_used']}")
 
 ```python
 import logging
-from agent import create_agent, AgentConfig
-from memory import create_memory
+from repoa.core.agent import create_agent, AgentConfig
+from repoa.core.memory import create_memory
 
 # Configure memory logging through AgentConfig
 config = AgentConfig(
@@ -253,7 +299,7 @@ memory.add_agent_message("Hi there!")
 ### 7. KV Cache Optimization
 
 ```python
-from memory import Memory, MemoryConfig
+from repoa.core.memory import Memory, MemoryConfig
 
 memory = Memory(
     system_prompt="You are an AI assistant.",
@@ -312,7 +358,7 @@ session_id = memory.session_id
 memory.save()
 
 # Later: Load session
-from chat import ChatManager
+from repoa.cli.chat import ChatManager
 
 manager = ChatManager(storage_dir="./sessions")
 loaded_chat = manager.load_chat(session_id)
@@ -713,7 +759,7 @@ agent = Agent(name="MyAgent", system_prompt=prompt, tools=tools, memory=memory)
 **New in v2.1 - Logging Configuration:**
 ```python
 import logging
-from agent import create_agent, AgentConfig
+from repoa.core.agent import create_agent, AgentConfig
 
 config = AgentConfig(
     log_level=logging.INFO,
