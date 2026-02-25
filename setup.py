@@ -22,8 +22,8 @@ if requirements_file.exists():
 setup(
     name="RepoA",
     version="2.1.0",
-    author="VCoder4646",
-    author_email="vasanthwork0475@gmail.com",
+    author="CHAI",
+    author_email="youremail@gmail.com",
     description="A comprehensive, modular agent system with Memory management, KV cache optimization, and cost-efficient LLM integration",
     long_description=long_description,
     long_description_content_type="text/markdown",
