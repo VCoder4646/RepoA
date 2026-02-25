@@ -7,10 +7,42 @@ from typing import Optional, List, Dict, Any, Callable
 from datetime import datetime
 import uuid
 import json
+import logging
 from pathlib import Path
 
 from system_prompt import SystemPrompt
 from tools_pro import ToolProcessor, Tool, ToolType
+
+# Configure logging
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
+def set_agent_logging_level(level: int) -> None:
+    """
+    Set the logging level for agent module.
+    
+    Args:
+        level: Logging level (logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR)
+    
+    Examples:
+        # Set to DEBUG for detailed logs
+        set_agent_logging_level(logging.DEBUG)
+        
+        # Set to WARNING for fewer logs
+        set_agent_logging_level(logging.WARNING)
+    """
+    logger.setLevel(level)
+    logger.info(f"Agent logging level set to: {logging.getLevelName(level)}")
+
 
 # Conditional import for Chat and Message (core dependencies)
 try:
@@ -50,6 +82,14 @@ class AgentConfig:
         temperature: LLM temperature setting
         verbose: Whether to print verbose output
         timeout: Timeout in seconds for agent operations
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        enable_logging: Whether to enable logging
+        auto_save_chat: Whether to automatically save chat after each interaction
+        chat_save_dir: Directory to save chat sessions
+        log_file: Path to log file (None for console only)
+        memory_log_level: Logging level for memory module (DEBUG, INFO, WARNING, ERROR)
+        enable_memory_logging: Whether to enable memory logging
+        memory_log_file: Optional separate log file for memory operations
         additional_settings: Dictionary for any additional settings
     """
     
@@ -59,13 +99,59 @@ class AgentConfig:
         temperature: float = 0.7,
         verbose: bool = False,
         timeout: int = 300,
+        log_level: int = logging.INFO,
+        enable_logging: bool = True,
+        auto_save_chat: bool = False,
+        chat_save_dir: str = "",
+        log_file: Optional[str] = None,
+        memory_log_level: int = logging.INFO,
+        enable_memory_logging: bool = True,
+        memory_log_file: Optional[str] = None,
         **additional_settings
     ):
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.verbose = verbose
         self.timeout = timeout
+        self.log_level = log_level
+        self.enable_logging = enable_logging
+        self.auto_save_chat = auto_save_chat
+        self.chat_save_dir = chat_save_dir
+        self.log_file = log_file
+        self.memory_log_level = memory_log_level
+        self.enable_memory_logging = enable_memory_logging
+        self.memory_log_file = memory_log_file
         self.additional_settings = additional_settings
+        
+        # Configure logging based on settings
+        if self.enable_logging:
+            set_agent_logging_level(self.log_level)
+            
+            # Add file handler if log_file specified
+            if self.log_file:
+                file_handler = logging.FileHandler(self.log_file)
+                file_handler.setFormatter(logging.Formatter(
+                    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                ))
+                logger.addHandler(file_handler)
+                logger.info(f"Logging to file: {self.log_file}")
+        
+        # Configure memory logging
+        if self.enable_memory_logging and MEMORY_AVAILABLE:
+            from memory import set_memory_logging_level
+            set_memory_logging_level(self.memory_log_level)
+            
+            # Add file handler for memory logging if specified
+            if self.memory_log_file:
+                memory_logger = logging.getLogger('memory')
+                memory_file_handler = logging.FileHandler(self.memory_log_file)
+                memory_file_handler.setFormatter(logging.Formatter(
+                    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                ))
+                memory_logger.addHandler(memory_file_handler)
+                logger.info(f"Memory logging to file: {self.memory_log_file}")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
@@ -74,6 +160,11 @@ class AgentConfig:
             "temperature": self.temperature,
             "verbose": self.verbose,
             "timeout": self.timeout,
+            "log_level": logging.getLevelName(self.log_level),
+            "enable_logging": self.enable_logging,
+            "auto_save_chat": self.auto_save_chat,
+            "chat_save_dir": self.chat_save_dir,
+            "log_file": self.log_file,
             **self.additional_settings
         }
 
@@ -131,6 +222,13 @@ class Agent:
         self.memory = memory
         self.use_memory_cache = use_memory_cache and memory is not None
         
+        # Apply memory logging configuration if memory is provided
+        if self.memory and self.config.enable_memory_logging and MEMORY_AVAILABLE:
+            from memory import set_memory_logging_level
+            set_memory_logging_level(self.config.memory_log_level)
+        
+        logger.info(f"Initializing agent: name='{agent_name}', id={self.agent_id[:8]}..., tools={len(tools_processor)}")
+        
         # Chat management (primary conversation manager)
         self.chat: Optional[Chat] = None
         self.chat_manager: Optional[ChatManager] = None
@@ -142,9 +240,10 @@ class Agent:
                 chat_id=self.agent_id,
                 metadata={"agent_name": self.agent_name}
             )
-            self.chat_manager = ChatManager(storage_dir="./agent_chats")
+            self.chat_manager = ChatManager(storage_dir=self.config.chat_save_dir)
             # Register chat with manager
             self.chat_manager.chats[self.chat.chat_id] = self.chat
+            logger.debug(f"[{self.agent_id[:8]}] Chat enabled with ID: {self.chat.chat_id}")
         
         # Agent state
         self.state = {
@@ -183,6 +282,8 @@ class Agent:
                 print(f"Chat enabled with ID: {self.chat.chat_id}")
             if self.use_memory_cache:
                 print(f"Memory cache enabled with session: {self.memory.session_id}")
+        
+        logger.info(f"[{self.agent_id[:8]}] Agent initialized successfully: llm={self.llm_client is not None}, memory={self.use_memory_cache}, auto_save_chat={self.config.auto_save_chat}")
     
     def get_system_prompt(self, **kwargs) -> str:
         """
@@ -234,6 +335,7 @@ class Agent:
             tool: Tool instance to add
         """
         self.tools_processor.add_tool(tool)
+        logger.info(f"[{self.agent_id[:8]}] Tool added: '{tool.name}' ({tool.tool_type.value})")
         if self.config.verbose:
             print(f"Tool '{tool.name}' added to agent '{self.agent_name}'")
     
@@ -248,8 +350,10 @@ class Agent:
             True if removed, False if not found
         """
         result = self.tools_processor.remove_tool(tool_name)
-        if result and self.config.verbose:
-            print(f"Tool '{tool_name}' removed from agent '{self.agent_name}'")
+        if result:
+            logger.info(f"[{self.agent_id[:8]}] Tool removed: '{tool_name}'")
+            if self.config.verbose:
+                print(f"Tool '{tool_name}' removed from agent '{self.agent_name}'")
         return result
     
     def validate_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> tuple[bool, Optional[str]]:
@@ -285,6 +389,7 @@ class Agent:
         
         if not is_valid:
             self.stats["failed_tool_calls"] += 1
+            logger.warning(f"[{self.agent_id[:8]}] Tool validation failed: {tool_name} - {error_msg}")
             return {
                 "success": False,
                 "error": error_msg,
@@ -295,11 +400,14 @@ class Agent:
         tool = self.tools_processor.get_tool(tool_name)
         self.stats["tool_calls"] += 1
         
+        logger.debug(f"[{self.agent_id[:8]}] Executing tool: {tool_name} with args: {list(arguments.keys())}")
+        
         # If tool has a function, execute it
         if tool.function:
             try:
                 result = tool.function(**arguments)
                 self.stats["successful_tool_calls"] += 1
+                logger.info(f"[{self.agent_id[:8]}] Tool executed successfully: {tool_name}")
                 return {
                     "success": True,
                     "result": result,
@@ -307,6 +415,7 @@ class Agent:
                 }
             except Exception as e:
                 self.stats["failed_tool_calls"] += 1
+                logger.error(f"[{self.agent_id[:8]}] Tool execution failed: {tool_name} - {str(e)}")
                 return {
                     "success": False,
                     "error": str(e),
@@ -333,6 +442,7 @@ class Agent:
         self.history.append(interaction)
         self.state["last_activity"] = interaction["timestamp"]
         self.stats["total_interactions"] += 1
+        logger.debug(f"[{self.agent_id[:8]}] Interaction added to history: {interaction.get('type', 'unknown')}")
     
     def get_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -350,7 +460,9 @@ class Agent:
     
     def clear_history(self) -> None:
         """Clear the agent's interaction history."""
+        count = len(self.history)
         self.history.clear()
+        logger.info(f"[{self.agent_id[:8]}] History cleared: {count} interactions removed")
         if self.config.verbose:
             print(f"History cleared for agent '{self.agent_name}'")
     
@@ -363,6 +475,7 @@ class Agent:
         """
         self.state.update(kwargs)
         self.state["last_activity"] = datetime.now().isoformat()
+        logger.debug(f"[{self.agent_id[:8]}] State updated: {list(kwargs.keys())}")
     
     def get_agent_info(self) -> Dict[str, Any]:
         """
@@ -477,6 +590,13 @@ class Agent:
             raise RuntimeError("Memory module not available.")
         self.memory = memory
         self.use_memory_cache = enable_cache
+        
+        # Apply memory logging configuration
+        if self.config.enable_memory_logging:
+            from memory import set_memory_logging_level
+            set_memory_logging_level(self.config.memory_log_level)
+            logger.debug(f"[{self.agent_id[:8]}] Memory logging configured: level={logging.getLevelName(self.config.memory_log_level)}")
+        
         if self.config.verbose:
             print(f"Memory set: session={memory.session_id}, cache_enabled={enable_cache}")
     
@@ -559,8 +679,11 @@ class Agent:
         if not LLM_AVAILABLE:
             raise RuntimeError("LLM client module not available.")
         
+        logger.info(f"[{self.agent_id[:8]}] Starting agent run: user_message_len={len(user_message)}, max_iterations={max_iterations or self.config.max_iterations}")
+        
         # Reset conversation if requested
         if reset_conversation:
+            logger.debug(f"[{self.agent_id[:8]}] Resetting conversation history")
             if self.use_memory_cache:
                 self.memory.clear(keep_system=True)
             elif self.chat:
@@ -625,17 +748,23 @@ class Agent:
                 
                 self.stats["llm_calls"] += 1
                 self.stats["total_tokens"] += response.usage.get("total_tokens", 0)
+                tokens_used = response.usage.get("total_tokens", 0)
+                
+                logger.debug(f"[{self.agent_id[:8]}] LLM call completed: tokens={tokens_used}, finish_reason={response.finish_reason}")
                 
                 # Track cache hits from LLM response
                 if response.has_cache_hit():
                     self.stats["cache_hits"] += 1
                     cache_info = response.get_cache_info()
-                    self.stats["total_cached_tokens"] += cache_info.get("cached_tokens", 0)
+                    cached = cache_info.get("cached_tokens", 0)
+                    self.stats["total_cached_tokens"] += cached
+                    logger.info(f"[{self.agent_id[:8]}] LLM cache hit: {cached} tokens cached")
                 else:
                     self.stats["cache_misses"] += 1
                 
             except Exception as e:
                 error_msg = f"LLM error: {str(e)}"
+                logger.error(f"[{self.agent_id[:8]}] {error_msg}")
                 if self.config.verbose:
                     print(f"❌ {error_msg}")
                 self.update_state(status="error")
@@ -686,7 +815,11 @@ class Agent:
                         
                         # Parse arguments
                         try:
-                            tool_args = parse_tool_call_arguments(tool_args_str)
+                            # Check if arguments are already a dict
+                            if isinstance(tool_args_str, dict):
+                                tool_args = tool_args_str
+                            else:
+                                tool_args = parse_tool_call_arguments(tool_args_str)
                         except Exception as e:
                             tool_args = {}
                             if self.config.verbose:
@@ -772,11 +905,14 @@ class Agent:
         
         if iterations >= max_iter and not final_response:
             final_response = "Maximum iterations reached without final response."
+            logger.warning(f"[{self.agent_id[:8]}] Maximum iterations reached without final response")
         
         if self.config.verbose:
             print(f"\n{'='*60}")
             print(f"Agent completed in {iterations} iteration(s)")
             print(f"{'='*60}\n")
+        
+        logger.info(f"[{self.agent_id[:8]}] Agent run completed: iterations={iterations}, tool_calls={len(tool_calls_made)}, tokens={self.stats['total_tokens']}")
         
         # Get cache info for result
         cache_info = self.get_cache_info() if self.use_memory_cache else None
@@ -793,7 +929,150 @@ class Agent:
         if cache_info:
             result["cache_info"] = cache_info
         
+        # Auto-save chat if enabled
+        if self.config.auto_save_chat and self.chat:
+            try:
+                saved_path = self.save_chat()
+                logger.info(f"[{self.agent_id[:8]}] Chat auto-saved to: {saved_path}")
+            except Exception as e:
+                logger.warning(f"[{self.agent_id[:8]}] Failed to auto-save chat: {e}")
+        
         return result
+    
+    def invoke(
+        self,
+        input: str,
+        tool_name: Optional[str] = None,
+        tool_arguments: Optional[Dict[str, Any]] = None,
+        use_llm: bool = True,
+        max_iterations: Optional[int] = None,
+        reset_conversation: bool = False,
+        return_full_response: bool = False
+    ) -> Any:
+        """
+        Invoke the agent to process input and generate a response.
+        
+        This is a flexible method that can:
+        1. Use the LLM to reason and call tools automatically (default mode)
+        2. Execute a specific tool directly without LLM
+        3. Generate a text response using LLM without tools
+        
+        Args:
+            input: User input or task description
+            tool_name: Optional tool name for direct tool execution (bypasses LLM)
+            tool_arguments: Arguments for direct tool execution (used with tool_name)
+            use_llm: Whether to use LLM for generation (default: True)
+            max_iterations: Maximum agent iterations for LLM mode
+            reset_conversation: Whether to reset conversation history before invocation
+            return_full_response: Whether to return full response dict or just the result/response
+            
+        Returns:
+            Response from the agent. Format depends on mode:
+            - LLM mode: String response or full dict (if return_full_response=True)
+            - Direct tool mode: Tool execution result or full dict
+            
+        Examples:
+            # LLM-based reasoning with automatic tool calling
+            result = agent.invoke("What's the weather in New York?")
+            
+            # Direct tool execution
+            result = agent.invoke(
+                input="Get weather data",
+                tool_name="get_weather",
+                tool_arguments={"city": "New York"},
+                use_llm=False
+            )
+            
+            # Get full response with metadata
+            result = agent.invoke(
+                input="Analyze this data",
+                return_full_response=True
+            )
+        """
+        # Mode 1: Direct tool execution (no LLM)
+        if tool_name is not None:
+            if self.config.verbose:
+                print(f"🔧 Invoking tool directly: {tool_name}")
+            
+            tool_args = tool_arguments or {}
+            tool_result = self.execute_tool(tool_name, tool_args)
+            
+            # Add to history
+            self.add_to_history({
+                "type": "direct_tool_call",
+                "tool": tool_name,
+                "arguments": tool_args,
+                "result": tool_result,
+                "input": input
+            })
+            
+            if return_full_response:
+                return {
+                    "success": tool_result.get("success", False),
+                    "result": tool_result.get("result"),
+                    "error": tool_result.get("error"),
+                    "tool": tool_name,
+                    "mode": "direct_tool"
+                }
+            else:
+                if tool_result.get("success"):
+                    return tool_result.get("result")
+                else:
+                    error_msg = tool_result.get("error", "Tool execution failed")
+                    if self.config.verbose:
+                        print(f"❌ Tool error: {error_msg}")
+                    raise RuntimeError(f"Tool '{tool_name}' failed: {error_msg}")
+        
+        # Mode 2: LLM-based execution with automatic tool calling
+        elif use_llm:
+            if not self.llm_client:
+                raise RuntimeError(
+                    "No LLM client configured. Either set an LLM client using set_llm_client() "
+                    "or specify tool_name and tool_arguments for direct tool execution."
+                )
+            
+            if self.config.verbose:
+                print(f"🤖 Invoking agent with LLM: {self.agent_name}")
+            
+            result = self.run(
+                user_message=input,
+                max_iterations=max_iterations,
+                reset_conversation=reset_conversation
+            )
+            
+            if return_full_response:
+                result["mode"] = "llm_with_tools"
+                return result
+            else:
+                return result.get("response", "")
+        
+        # Mode 3: Simple text generation (LLM without tools)
+        else:
+            if not self.llm_client:
+                raise RuntimeError("No LLM client configured for text generation.")
+            
+            if self.config.verbose:
+                print(f"💬 Generating response without tools")
+            
+            # Temporarily clear tools for this call
+            original_tools = self.tools_processor._tools.copy()
+            self.tools_processor._tools = {}
+            
+            try:
+                result = self.run(
+                    user_message=input,
+                    max_iterations=1,  # Single iteration for simple generation
+                    reset_conversation=reset_conversation
+                )
+                
+                if return_full_response:
+                    result["mode"] = "llm_no_tools"
+                    return result
+                else:
+                    return result.get("response", "")
+            finally:
+                # Restore original tools
+                self.tools_processor._tools = original_tools
     
     def send_message(self, message: str) -> str:
         """
@@ -831,6 +1110,7 @@ class Agent:
             Path to saved file or None
         """
         if self.use_memory_cache:
+            logger.info(f"[{self.agent_id[:8]}] Saving memory session")
             path = self.memory.save(force=force)
             if self.config.verbose:
                 print(f"Memory saved to: {path}")
@@ -853,6 +1133,7 @@ class Agent:
             # Ensure chat is registered with manager
             self.chat_manager.chats[self.chat.chat_id] = self.chat
             # Save using manager
+            logger.info(f"[{self.agent_id[:8]}] Saving chat session: {self.chat.get_message_count()} messages")
             self.chat_manager.save_chat(self.chat.chat_id)
             path = str(self.chat_manager.storage_dir / f"{self.chat.chat_id}.json")
             if self.config.verbose:
@@ -875,19 +1156,22 @@ class Agent:
             return False
         
         if not self.chat_manager:
-            self.chat_manager = ChatManager(storage_dir=storage_dir or "./agent_chats")
+            self.chat_manager = ChatManager(storage_dir=storage_dir or "")
         elif storage_dir:
             self.chat_manager.storage_dir = Path(storage_dir)
         
         try:
+            logger.info(f"[{self.agent_id[:8]}] Loading chat session: {chat_id}")
             loaded_chat = self.chat_manager.load_chat(chat_id)
             self.chat = loaded_chat
             # Update agent_id to match loaded chat
             self.agent_id = chat_id
+            logger.info(f"[{self.agent_id[:8]}] Chat loaded successfully: {self.chat.get_message_count()} messages")
             if self.config.verbose:
                 print(f"Chat loaded: {chat_id} ({self.chat.get_message_count()} messages)")
             return True
         except Exception as e:
+            logger.error(f"[{self.agent_id[:8]}] Failed to load chat: {e}")
             if self.config.verbose:
                 print(f"Failed to load chat: {e}")
             return False

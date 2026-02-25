@@ -1,9 +1,16 @@
-# Finance Agent System v2.0
+A comprehensive, modular agent system with **Memory management**, **KV cache optimization**, **comprehensive logging**, and **cost-efficient LLM integration**.
 
-A comprehensive, modular agent system with **Memory management**, **KV cache optimization**, and **cost-efficient LLM integration**.
+## 🚀 What's New in v2.1
 
-## 🚀 What's New in v2.0
+### New Features
+- **🎯 invoke() Method**: Flexible agent invocation with 3 modes (LLM with tools, direct tool execution, text generation)
+- **📝 Comprehensive Logging**: Configurable logging for both agent and memory operations
+- **💾 Auto-Save Chat**: Automatic session persistence with configurable options
+- **🔧 Memory Logging**: Separate logging configuration for memory module
+- **📊 Enhanced Monitoring**: Track all operations with detailed logs
+- **🐛 Bug Fixes**: Improved tool argument parsing (handles both dict and string formats)
 
+### From v2.0
 - **Memory System**: Smart conversation management with automatic persistence
 - **KV Cache Tracking**: Monitor and optimize LLM cache usage for cost savings
 - **Agent-Memory Integration**: Seamless agent operation with conversation history
@@ -28,10 +35,17 @@ A comprehensive, modular agent system with **Memory management**, **KV cache opt
 - **Session Management**: Unique IDs and metadata support
 - **Multi-turn Optimization**: Efficient context reuse
 
+### Logging & Monitoring
+- **Agent Logging**: Comprehensive logging for all agent operations
+- **Memory Logging**: Separate configurable logging for memory operations
+- **Log Levels**: DEBUG, INFO, WARNING, ERROR
+- **File Logging**: Optional separate log files for agent and memory
+- **Auto-Save Chat**: Configurable automatic chat persistence
+- **Operation Tracking**: Detailed logs for initialization, tool execution, LLM calls, saves/loads
+
 ## 📁 Project Structure
 
 ```
-Finance_Agent/
 ├── agent.py                          # Agent system with Memory integration
 ├── memory.py                         # Memory management with KV cache
 ├── chat.py                           # Chat session management
@@ -41,19 +55,6 @@ Finance_Agent/
 ├── llm_client.py                     # LLM clients with cache tracking
 ├── config.py                         # Configuration settings
 ├── utils.py                          # Utility functions
-│
-├── test/
-│   ├── example_memory_integration.py # Memory system examples
-│   ├── example_chat_integration.py   # Chat & Message examples
-│   ├── example_agent_comprehensive.py # Complete agent examples
-│   ├── example_kv_cache_usage.py     # KV cache examples
-│   ├── sample.py                     # Quick start samples
-│   ├── test_kv_cache_integration.py  # KV cache tests
-│   └── test_agent_with_cache.py      # Agent integration tests
-│
-└── docs/
-    ├── KV_CACHE_GUIDE.md             # KV cache optimization guide
-    └── AGENT_CACHE_GUIDE.md          # Agent cache integration guide
 ```
 
 ## 🔧 Installation
@@ -81,7 +82,36 @@ agent = create_agent(
 print(agent.get_agent_info())
 ```
 
-### 2. Agent with Memory
+### 2. Agent with Logging and Auto-Save
+
+```python
+import logging
+from agent import create_agent, AgentConfig
+
+# Configure with logging and auto-save
+config = AgentConfig(
+    log_level=logging.INFO,              # Agent log level
+    enable_logging=True,                 # Enable agent logging
+    auto_save_chat=True,                 # Auto-save after each run
+    chat_save_dir="./my_chats",          # Where to save chats
+    log_file="agent.log",                # Optional log file
+    memory_log_level=logging.DEBUG,      # Memory log level
+    enable_memory_logging=True,          # Enable memory logging
+    memory_log_file="memory.log"         # Optional separate memory log
+)
+
+agent = create_agent(
+    name="LoggedAgent",
+    config=config
+)
+
+# All operations will be logged
+# Chat will auto-save after each run
+```
+
+**See [AGENT_LOGGING_DOCS.md](AGENT_LOGGING_DOCS.md) for complete logging documentation.**
+
+### 3. Agent with Memory
 
 ```python
 from agent import Agent
@@ -115,7 +145,7 @@ memory.add_agent_message("Hi there! How can I help?")
 agent.save_memory()
 ```
 
-### 3. Agent with Tools
+### 4. Agent with Tools
 
 ```python
 from tools_pro import create_custom_tool
@@ -150,7 +180,77 @@ result = agent.execute_tool("calculator", {"expression": "10 * 5"})
 print(result['result']['result'])  # 50
 ```
 
-### 4. KV Cache Optimization
+### 5. Using the invoke() Method
+
+The `invoke()` method provides a flexible interface for agent interaction with three modes:
+
+```python
+from agent import create_agent
+from llm_client import OllamaClient
+
+agent = create_agent("MyAgent")
+agent.set_llm_client(OllamaClient(model_name="llama2"))
+
+# Mode 1: LLM with automatic tool calling (default)
+response = agent.invoke("What's the weather in New York?")
+print(response)
+
+# Mode 2: Direct tool execution (no LLM)
+result = agent.invoke(
+    input="Get weather",
+    tool_name="get_weather",
+    tool_arguments={"city": "NYC"},
+    use_llm=False
+)
+print(result)
+
+# Mode 3: Get full response with metadata
+result = agent.invoke(
+    "Analyze this data",
+    return_full_response=True
+)
+print(f"Response: {result['response']}")
+print(f"Tools used: {len(result['tool_calls'])}")
+print(f"Tokens: {result['tokens_used']}")
+```
+
+**See [INVOKE_METHOD_DOCS.md](INVOKE_METHOD_DOCS.md) for complete documentation.**
+
+### 6. Memory Logging Configuration
+
+```python
+import logging
+from agent import create_agent, AgentConfig
+from memory import create_memory
+
+# Configure memory logging through AgentConfig
+config = AgentConfig(
+    log_level=logging.INFO,              # Agent logs at INFO
+    memory_log_level=logging.DEBUG,      # Memory logs at DEBUG (more detail)
+    enable_memory_logging=True
+)
+
+agent = create_agent("MemoryAgent", config=config)
+
+# Create and set memory - logging automatically configured
+memory = create_memory(
+    system_prompt="You are helpful.",
+    max_tokens=1000
+)
+
+agent.set_memory(memory)
+
+# Memory operations will be logged according to config
+memory.add_user_message("Hello!")
+# DEBUG - [chat_202] User message added: 6 chars, ~1 tokens
+
+memory.add_agent_message("Hi there!")
+# DEBUG - [chat_202] Agent message added: 9 chars, ~2 tokens, tool_calls=0
+```
+
+**See [MEMORY_LOGGING_DOCS.md](MEMORY_LOGGING_DOCS.md) for complete memory logging guide.**
+
+### 7. KV Cache Optimization
 
 ```python
 from memory import Memory, MemoryConfig
@@ -196,7 +296,7 @@ print(f"Cached tokens: {cache_info['total_cached_tokens']}")
 print(f"Cost savings: ${cache_info['cost_savings']:.4f}")
 ```
 
-### 5. Session Persistence
+### 8. Session Persistence
 
 ```python
 # Create and save session
@@ -235,18 +335,35 @@ Main agent implementation with Memory integration.
 **Classes:**
 - `Agent`: Primary agent class with memory support
 - `AgentBuilder`: Builder pattern for agent creation
-- `AgentConfig`: Configuration settings
+- `AgentConfig`: Configuration settings (logging, auto-save, memory logging)
 
 **Key Methods:**
-- `set_memory(memory)`: Set or update Memory instance
+- `invoke(input, ...)`: Flexible interface for agent invocation (3 modes: LLM with tools, direct tool, text generation)
+- `run(user_message, ...)`: Execute agent with LLM and automatic tool calling
+- `send_message(message)`: Simple chat interface
+- `set_memory(memory)`: Set or update Memory instance (configures logging)
 - `get_cache_info()`: Get KV cache statistics
 - `save_memory()`: Save memory session
+- `save_chat()`: Save chat session
+- `load_chat(session_id)`: Load saved chat session
 - `get_memory_stats()`: Get comprehensive memory statistics
-- `execute_tool(name, args)`: Execute a tool
+- `execute_tool(name, args)`: Execute a tool directly
+
+**Configuration (AgentConfig):**
+- `log_level`: Logging level for agent (DEBUG, INFO, WARNING, ERROR)
+- `enable_logging`: Enable/disable agent logging
+- `auto_save_chat`: Auto-save chat after each run
+- `chat_save_dir`: Directory for chat sessions
+- `log_file`: Optional log file for agent operations
+- `memory_log_level`: Logging level for memory module
+- `enable_memory_logging`: Enable/disable memory logging
+- `memory_log_file`: Optional separate log file for memory
 
 **Features:**
 - Tool execution and validation
 - History tracking
+- Comprehensive logging (all operations)
+- Auto-save chat functionality
 - Cache statistics (hits, misses, savings)
 - Export/import configurations
 
@@ -266,6 +383,7 @@ Smart memory manager with KV cache tracking.
 - `get_llm_cache_info()`: Get LLM cache statistics
 - `save()`: Save session to disk
 - `get_stats()`: Get memory statistics
+- `clear()`: Clear memory (optional keep system/archived)
 
 **Features:**
 - Automatic persistence when limits exceeded
@@ -273,6 +391,8 @@ Smart memory manager with KV cache tracking.
 - Message archiving
 - Cost savings calculation
 - Session management with unique IDs
+- Comprehensive logging (when enabled)
+- Token counting and overflow handling
 
 ### chat.py
 
@@ -469,17 +589,27 @@ With KV cache enabled:
 
 ### Complete Examples Available
 
+**Core Examples:**
 1. **sample.py**: Quick start samples (5 examples)
 2. **example_memory_integration.py**: Memory system (8 examples)
 3. **example_chat_integration.py**: Chat & Message (8 examples)
 4. **example_agent_comprehensive.py**: Agent workflows (5 examples)
 5. **example_kv_cache_usage.py**: Cache optimization (6 examples)
 
+**New Features Examples:**
+6. **example_invoke.py**: invoke() method usage (3 modes)
+7. **example_agent_logging.py**: Agent logging and auto-save (6 tests)
+8. **example_memory_logging.py**: Memory logging demo (quick start)
+9. **example_agent_memory_logging.py**: Memory logging config (6 examples)
+10. **test_memory_logging.py**: Comprehensive memory logging tests
+
 Run any example:
 ```bash
 python sample.py
-python test/example_memory_integration.py
-python test/example_agent_comprehensive.py
+python example_invoke.py
+python example_agent_logging.py
+python example_memory_logging.py
+python test_memory_logging.py
 ```
 
 ## 🔬 Testing
@@ -499,14 +629,33 @@ All tests include:
 - Agent workflows
 - Tool execution
 - Session persistence
+- Logging functionality
+- invoke() method operations
 
 ## 📚 Documentation
 
 Comprehensive guides available:
 
+**Core Documentation:**
+- **README.md**: This file (overview and quick reference)
 - **KV_CACHE_GUIDE.md**: Complete KV cache optimization guide
 - **AGENT_CACHE_GUIDE.md**: Agent-Memory integration guide
-- **README.md**: This file (overview and quick reference)
+
+**New Features Documentation:**
+- **AGENT_LOGGING_DOCS.md**: Complete agent logging and auto-save guide
+- **MEMORY_LOGGING_DOCS.md**: Memory logging configuration and usage
+- **INVOKE_METHOD_DOCS.md**: invoke() method documentation (3 modes)
+- **IMPLEMENTATION_SUMMARY.md**: invoke() implementation details
+
+### Quick Reference
+
+| Feature | Documentation | Example |
+|---------|--------------|----------|
+| Agent Logging | [AGENT_LOGGING_DOCS.md](AGENT_LOGGING_DOCS.md) | [example_agent_logging.py](example_agent_logging.py) |
+| Memory Logging | [MEMORY_LOGGING_DOCS.md](MEMORY_LOGGING_DOCS.md) | [example_memory_logging.py](example_memory_logging.py) |
+| invoke() Method | [INVOKE_METHOD_DOCS.md](INVOKE_METHOD_DOCS.md) | [example_invoke.py](example_invoke.py) |
+| KV Cache | [KV_CACHE_GUIDE.md](KV_CACHE_GUIDE.md) | [example_kv_cache_usage.py](example_kv_cache_usage.py) |
+| Agent Integration | [AGENT_CACHE_GUIDE.md](AGENT_CACHE_GUIDE.md) | [example_agent_comprehensive.py](example_agent_comprehensive.py) |
 
 ## 🏗️ Architecture
 
@@ -555,10 +704,26 @@ Comprehensive guides available:
 agent = Agent(name="MyAgent", system_prompt=prompt, tools=tools)
 ```
 
-**After (v2.0):**
+**After (v2.0+):**
 ```python
 memory = Memory(system_prompt=prompt.get_prompt())
 agent = Agent(name="MyAgent", system_prompt=prompt, tools=tools, memory=memory)
+```
+
+**New in v2.1 - Logging Configuration:**
+```python
+import logging
+from agent import create_agent, AgentConfig
+
+config = AgentConfig(
+    log_level=logging.INFO,
+    enable_logging=True,
+    auto_save_chat=True,
+    memory_log_level=logging.DEBUG,
+    enable_memory_logging=True
+)
+
+agent = create_agent("MyAgent", config=config)
 ```
 
 ## 🤝 Contributing
@@ -579,28 +744,19 @@ This project is provided as-is for educational and development purposes.
 
 For questions or issues:
 
-1. Check the comprehensive examples in `test/` directory
-2. Review the guides: `KV_CACHE_GUIDE.md` and `AGENT_CACHE_GUIDE.md`
+1. Check the comprehensive examples directory
+2. Review the documentation guides:
+   - [AGENT_LOGGING_DOCS.md](AGENT_LOGGING_DOCS.md) - Logging configuration
+   - [MEMORY_LOGGING_DOCS.md](MEMORY_LOGGING_DOCS.md) - Memory logging
+   - [INVOKE_METHOD_DOCS.md](INVOKE_METHOD_DOCS.md) - invoke() method
+   - [KV_CACHE_GUIDE.md](KV_CACHE_GUIDE.md) - Cache optimization
+   - [AGENT_CACHE_GUIDE.md](AGENT_CACHE_GUIDE.md) - Agent integration
 3. Examine docstrings in each module
-4. Run the test suites to understand expected behavior
+4. Run the example scripts to understand expected behavior
 
-## 🎯 Roadmap
 
-Future enhancements:
 
-- [ ] Streaming response support
-- [ ] Advanced cache strategies
-- [ ] Multi-agent conversations
-- [ ] Vector database integration for long-term memory
-- [ ] Advanced tool orchestration
-- [ ] Real-time cost monitoring dashboard
-
----
-
-**Version**: 2.0  
-**Last Updated**: 2024-02-24  
+**Version**: 2.1.0  
+**Last Updated**: 2026-02-25  
 **Requirements**: Python 3.8+
 
-For detailed technical documentation, see:
-- [KV Cache Guide](KV_CACHE_GUIDE.md)
-- [Agent Cache Guide](AGENT_CACHE_GUIDE.md)

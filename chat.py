@@ -420,7 +420,7 @@ class ChatManager:
     Manages multiple chat sessions with persistence.
     """
     
-    def __init__(self, storage_dir: str = "./chats"):
+    def __init__(self, storage_dir: str = ""):
         """
         Initialize chat manager.
         

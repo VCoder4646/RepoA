@@ -45,6 +45,10 @@ exports/*.json
 *.db
 *.sqlite
 
+# Agent system directories
+memory_sessions/
+agent_chats/
+
 # Testing
 .pytest_cache/
 .coverage
@@ -67,3 +71,5 @@ tmp/
 # OS
 Thumbs.db
 .DS_Store
+
+sample.py
