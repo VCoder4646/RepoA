@@ -1,0 +1,645 @@
+"""
+Memory Module
+Smart memory management with chat persistence and KV caching.
+Automatically saves chats when memory limits are exceeded and maintains KV cache.
+"""
+
+from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime
+from pathlib import Path
+import json
+
+from chat import Chat, ChatManager
+from message import user_message, agent_message, tool_message
+
+
+class MemoryConfig:
+    """
+    Configuration for memory management.
+    """
+    def __init__(
+        self,
+        max_tokens: int = 4096,
+        max_messages: Optional[int] = None,
+        kv_cache_size: int = 10,
+        auto_save: bool = True,
+        storage_dir: str = "./memory_sessions"
+    ):
+        """
+        Initialize memory configuration.
+        
+        Args:
+            max_tokens: Maximum tokens in active memory before saving
+            max_messages: Maximum messages in active memory (None for unlimited)
+            kv_cache_size: Number of recent messages to keep in KV cache
+            auto_save: Whether to auto-save when limit exceeded
+            storage_dir: Directory to save chat sessions
+        """
+        self.max_tokens = max_tokens
+        self.max_messages = max_messages
+        self.kv_cache_size = kv_cache_size
+        self.auto_save = auto_save
+        self.storage_dir = storage_dir
+
+
+class Memory:
+    """
+    Smart memory manager that integrates with Chat for persistence.
+    
+    Features:
+    - Automatic chat persistence when memory limits exceeded
+    - KV cache management for efficient context retrieval
+    - Session-based storage with unique IDs
+    - Sliding window of recent messages
+    """
+    
+    def __init__(
+        self,
+        system_prompt: str,
+        config: Optional[MemoryConfig] = None,
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Initialize memory manager.
+        
+        Args:
+            system_prompt: System prompt for the chat
+            config: Memory configuration
+            session_id: Optional session ID (auto-generated if not provided)
+            metadata: Optional metadata for the session
+        """
+        self.config = config or MemoryConfig()
+        
+        # Create chat manager for persistence
+        self.chat_manager = ChatManager(storage_dir=self.config.storage_dir)
+        
+        # Initialize chat session
+        self.chat = self.chat_manager.create_chat(
+            system_prompt=system_prompt,
+            chat_id=session_id,
+            metadata=metadata or {}
+        )
+        
+        self.session_id = self.chat.chat_id
+        
+        # KV Cache: Store indices of cached messages
+        self._kv_cache: List[int] = []
+        self._cache_valid = True
+        self._last_cache_update = 0
+        
+        # LLM KV Cache tracking
+        self._llm_cached_tokens = 0  # Tokens cached by LLM
+        self._llm_cache_creation_tokens = 0  # Tokens used to create cache
+        self._llm_cache_read_tokens = 0  # Tokens read from cache
+        self._last_llm_response: Optional[Dict[str, Any]] = None
+        
+        # Statistics
+        self.stats = {
+            "total_messages_added": 0,
+            "total_tokens_processed": 0,
+            "saves_triggered": 0,
+            "cache_updates": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "messages_archived": 0,
+            "llm_cache_hits": 0,  # From LLM response
+            "llm_cache_misses": 0,  # From LLM response
+            "total_cached_tokens": 0,  # Total tokens cached by LLM
+            "cache_cost_savings": 0.0  # Estimated cost savings
+        }
+        
+        # Archive storage for old messages
+        self._archived_messages: List[Dict[str, Any]] = []
+    
+    def add_user_message(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Add a user message to memory.
+        
+        Args:
+            content: User message content
+            metadata: Optional metadata
+        """
+        self.chat.add_user_message(content, metadata)
+        self.stats["total_messages_added"] += 1
+        self.stats["total_tokens_processed"] += len(content) // 4  # Rough estimate
+        
+        # Invalidate cache when new message added
+        self._cache_valid = False
+        
+        # Check if we need to save
+        self._check_and_save()
+    
+    def add_agent_message(
+        self,
+        content: str,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        llm_response: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Add an agent message to memory.
+        
+        Args:
+            content: Agent message content
+            tool_calls: Optional tool calls
+            metadata: Optional metadata
+            llm_response: Optional LLM response with usage/cache data
+        """
+        self.chat.add_agent_message(content, tool_calls, metadata)
+        self.stats["total_messages_added"] += 1
+        self.stats["total_tokens_processed"] += len(content) // 4
+        
+        # Update LLM KV cache info if provided
+        if llm_response:
+            self._update_llm_cache_from_response(llm_response)
+        
+        # Invalidate cache
+        self._cache_valid = False
+        
+        # Check if we need to save
+        self._check_and_save()
+    
+    def add_tool_message(
+        self,
+        content: str,
+        tool_call_id: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Add a tool response message to memory.
+        
+        Args:
+            content: Tool response content
+            tool_call_id: ID of the tool call
+            metadata: Optional metadata
+        """
+        self.chat.add_tool_message(content, tool_call_id, metadata)
+        self.stats["total_messages_added"] += 1
+        self.stats["total_tokens_processed"] += len(content) // 4
+        
+        # Invalidate cache
+        self._cache_valid = False
+        
+        # Check if we need to save
+        self._check_and_save()
+    
+    def _check_and_save(self) -> None:
+        """
+        Check if memory limits exceeded and save if necessary.
+        """
+        if not self.config.auto_save:
+            return
+        
+        token_count = self.chat.get_token_count()
+        message_count = self.chat.get_message_count()
+        
+        # Check token limit
+        if token_count > self.config.max_tokens:
+            self._handle_memory_overflow()
+        
+        # Check message limit
+        elif self.config.max_messages and message_count > self.config.max_messages:
+            self._handle_memory_overflow()
+    
+    def _handle_memory_overflow(self) -> None:
+        """
+        Handle memory overflow by archiving old messages and saving.
+        """
+        # Save current state
+        self.save()
+        
+        # Archive old messages (keep only recent N in active memory)
+        messages_to_keep = self.config.kv_cache_size
+        total_messages = len(self.chat.messages)
+        
+        if total_messages > messages_to_keep:
+            # Archive older messages
+            messages_to_archive = total_messages - messages_to_keep
+            
+            for _ in range(messages_to_archive):
+                if self.chat.messages:
+                    archived_msg = self.chat.messages[0]  # Get first message
+                    self._archived_messages.append(archived_msg.to_full_dict())
+                    self.chat.messages.pop(0)  # Remove from active memory
+                    self.stats["messages_archived"] += 1
+            
+            # Update chat stats after archiving
+            self.chat.stats["total_messages"] = len(self.chat.messages)
+        
+        # Update KV cache
+        self._update_kv_cache()
+        
+        self.stats["saves_triggered"] += 1
+    
+    def get_messages(self, include_system: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get messages in LLM API format.
+        System prompt is included once at the beginning.
+        
+        Args:
+            include_system: Whether to include system prompt
+            
+        Returns:
+            List of message dictionaries
+        """
+        return self.chat.get_messages(include_system=include_system)
+    
+    def get_kv_cached_messages(self) -> Tuple[List[Dict[str, Any]], bool]:
+        """
+        Get messages optimized with KV cache.
+        
+        Returns:
+            Tuple of (messages, is_cache_valid)
+        """
+        messages = self.get_messages()
+        
+        if self._cache_valid:
+            self.stats["cache_hits"] += 1
+        else:
+            self.stats["cache_misses"] += 1
+            self._update_kv_cache()
+        
+        return messages, self._cache_valid
+    
+    def _update_kv_cache(self) -> None:
+        """
+        Update KV cache with current message indices.
+        Cache is updated every N messages based on kv_cache_size.
+        """
+        current_msg_count = len(self.chat.messages)
+        
+        # Determine which messages are cached
+        if current_msg_count <= self.config.kv_cache_size:
+            # Cache all messages
+            self._kv_cache = list(range(current_msg_count))
+        else:
+            # Cache only recent N messages
+            start_idx = current_msg_count - self.config.kv_cache_size
+            self._kv_cache = list(range(start_idx, current_msg_count))
+        
+        self._cache_valid = True
+        self._last_cache_update = current_msg_count
+        self.stats["cache_updates"] += 1
+    
+    def _update_llm_cache_from_response(self, llm_response: Dict[str, Any]) -> None:
+        """
+        Update KV cache information from LLM response.
+        
+        Args:
+            llm_response: LLM response containing usage/cache information
+        """
+        self._last_llm_response = llm_response
+        
+        # Handle different response formats
+        usage = llm_response.get("usage", {})
+        
+        # OpenAI/Anthropic prompt caching format
+        if "prompt_tokens_details" in usage:
+            details = usage["prompt_tokens_details"]
+            cached = details.get("cached_tokens", 0)
+            
+            if cached > 0:
+                self._llm_cached_tokens = cached
+                self.stats["llm_cache_hits"] += 1
+                self.stats["total_cached_tokens"] += cached
+            else:
+                self.stats["llm_cache_misses"] += 1
+        
+        # Anthropic cache format
+        elif "cache_creation_input_tokens" in usage:
+            self._llm_cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+            self._llm_cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+            
+            if self._llm_cache_read_tokens > 0:
+                self._llm_cached_tokens = self._llm_cache_read_tokens
+                self.stats["llm_cache_hits"] += 1
+                self.stats["total_cached_tokens"] += self._llm_cache_read_tokens
+            else:
+                self.stats["llm_cache_misses"] += 1
+        
+        # vLLM cached tokens format
+        elif "cached_tokens" in usage:
+            cached = usage.get("cached_tokens", 0)
+            if cached > 0:
+                self._llm_cached_tokens = cached
+                self.stats["llm_cache_hits"] += 1
+                self.stats["total_cached_tokens"] += cached
+            else:
+                self.stats["llm_cache_misses"] += 1
+        
+        # Calculate cost savings (assume $1 per 1M input tokens, 90% cache discount)
+        if self._llm_cached_tokens > 0:
+            original_cost = (usage.get("prompt_tokens", 0) / 1_000_000) * 1.0
+            cached_cost = (self._llm_cached_tokens / 1_000_000) * 0.1  # 90% discount
+            self.stats["cache_cost_savings"] += (original_cost - cached_cost)
+    
+    def get_llm_cache_info(self) -> Dict[str, Any]:
+        """
+        Get LLM KV cache information.
+        
+        Returns:
+            Dictionary with LLM cache statistics
+        """
+        total_llm_requests = self.stats["llm_cache_hits"] + self.stats["llm_cache_misses"]
+        llm_cache_hit_rate = (
+            self.stats["llm_cache_hits"] / total_llm_requests
+            if total_llm_requests > 0
+            else 0.0
+        )
+        
+        return {
+            "llm_cached_tokens": self._llm_cached_tokens,
+            "llm_cache_creation_tokens": self._llm_cache_creation_tokens,
+            "llm_cache_read_tokens": self._llm_cache_read_tokens,
+            "total_cached_tokens": self.stats["total_cached_tokens"],
+            "llm_cache_hits": self.stats["llm_cache_hits"],
+            "llm_cache_misses": self.stats["llm_cache_misses"],
+            "llm_cache_hit_rate": llm_cache_hit_rate,
+            "cache_cost_savings": self.stats["cache_cost_savings"],
+            "last_response": self._last_llm_response
+        }
+    
+    def get_cache_info(self) -> Dict[str, Any]:
+        """
+        Get KV cache information (application-level cache).
+        
+        Returns:
+            Dictionary with cache statistics
+        """
+        total_messages = len(self.chat.messages)
+        cached_count = len(self._kv_cache)
+        new_messages = total_messages - self._last_cache_update if self._cache_valid else total_messages
+        
+        return {
+            "total_messages": total_messages,
+            "cached_messages": cached_count,
+            "new_messages_since_cache": new_messages,
+            "cache_valid": self._cache_valid,
+            "cache_size_limit": self.config.kv_cache_size,
+            "cache_hit_rate": (
+                self.stats["cache_hits"] / (self.stats["cache_hits"] + self.stats["cache_misses"])
+                if (self.stats["cache_hits"] + self.stats["cache_misses"]) > 0
+                else 0.0
+            ),
+            "llm_cache": self.get_llm_cache_info()
+        }
+    
+    def save(self, force: bool = False) -> str:
+        """
+        Save chat session to disk.
+        
+        Args:
+            force: Force save even if auto_save is False
+            
+        Returns:
+            Path to saved file
+        """
+        if not self.config.auto_save and not force:
+            return ""
+        
+        # Save chat
+        self.chat_manager.save_chat(self.session_id)
+        
+        # Save archived messages separately if any exist
+        if self._archived_messages:
+            archive_path = Path(self.config.storage_dir) / f"{self.session_id}_archive.json"
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(archive_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "session_id": self.session_id,
+                    "archived_at": datetime.now().isoformat(),
+                    "archived_messages": self._archived_messages,
+                    "stats": self.stats
+                }, f, indent=2)
+        
+        return str(Path(self.config.storage_dir) / f"{self.session_id}.json")
+    
+    def load(self, session_id: str) -> None:
+        """
+        Load chat session from disk.
+        
+        Args:
+            session_id: Session ID to load
+        """
+        # Load chat
+        self.chat = self.chat_manager.load_chat(session_id)
+        self.session_id = session_id
+        
+        # Load archived messages if they exist
+        archive_path = Path(self.config.storage_dir) / f"{session_id}_archive.json"
+        if archive_path.exists():
+            with open(archive_path, 'r', encoding='utf-8') as f:
+                archive_data = json.load(f)
+                self._archived_messages = archive_data.get("archived_messages", [])
+                if "stats" in archive_data:
+                    self.stats.update(archive_data["stats"])
+        
+        # Update KV cache after loading
+        self._cache_valid = False
+        self._update_kv_cache()
+    
+    def get_full_history(self) -> List[Dict[str, Any]]:
+        """
+        Get full conversation history including archived messages.
+        
+        Returns:
+            List of all messages (archived + active)
+        """
+        full_history = []
+        
+        # Add archived messages
+        full_history.extend(self._archived_messages)
+        
+        # Add active messages
+        for msg in self.chat.messages:
+            full_history.append(msg.to_full_dict())
+        
+        return full_history
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive memory statistics.
+        
+        Returns:
+            Dictionary of statistics
+        """
+        chat_stats = self.chat.get_stats()
+        cache_info = self.get_cache_info()
+        llm_cache_info = self.get_llm_cache_info()
+        
+        return {
+            "session_id": self.session_id,
+            "active_messages": len(self.chat.messages),
+            "archived_messages": len(self._archived_messages),
+            "total_messages": len(self.chat.messages) + len(self._archived_messages),
+            "total_tokens": self.chat.get_token_count(),
+            "max_tokens": self.config.max_tokens,
+            "memory_usage_percent": (self.chat.get_token_count() / self.config.max_tokens) * 100,
+            "kv_cache": cache_info,
+            "llm_kv_cache": llm_cache_info,
+            "statistics": self.stats,
+            "chat_stats": chat_stats,
+            "auto_save_enabled": self.config.auto_save
+        }
+    
+    def clear(self, keep_system: bool = True, keep_archived: bool = False) -> None:
+        """
+        Clear memory.
+        
+        Args:
+            keep_system: Whether to keep system prompt
+            keep_archived: Whether to keep archived messages
+        """
+        self.chat.clear_messages(keep_system=keep_system)
+        
+        if not keep_archived:
+            self._archived_messages.clear()
+        
+        # Reset cache
+        self._kv_cache.clear()
+        self._cache_valid = False
+        self._last_cache_update = 0
+    
+    def get_context_window(self, num_messages: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get a specific window of recent messages.
+        
+        Args:
+            num_messages: Number of recent messages (None for all active)
+            
+        Returns:
+            List of recent messages
+        """
+        if num_messages is None:
+            return self.get_messages()
+        
+        return self.chat.get_recent_messages(num_messages)
+    
+    def get_messages_for_llm(
+        self,
+        include_system: bool = True,
+        optimize_for_cache: bool = True
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Get messages optimized for LLM with KV cache reuse.
+        
+        Args:
+            include_system: Whether to include system prompt
+            optimize_for_cache: Whether to optimize for KV cache
+            
+        Returns:
+            Tuple of (messages, cache_metadata)
+        """
+        messages = self.get_messages(include_system=include_system)
+        
+        cache_metadata = {
+            "cacheable_messages": len(self._kv_cache) if self._cache_valid else 0,
+            "new_messages": len(messages) - len(self._kv_cache) if self._cache_valid else len(messages),
+            "cache_valid": self._cache_valid,
+            "total_messages": len(messages)
+        }
+        
+        if optimize_for_cache and self._cache_valid:
+            # Mark which messages can be cached
+            # This helps LLM providers optimize KV cache reuse
+            cache_metadata["cache_breakpoint"] = len(self._kv_cache)
+        
+        return messages, cache_metadata
+    
+    def export_session(self, include_archived: bool = True) -> Dict[str, Any]:
+        """
+        Export complete session data.
+        
+        Args:
+            include_archived: Whether to include archived messages
+            
+        Returns:
+            Complete session data
+        """
+        data = {
+            "session_id": self.session_id,
+            "config": {
+                "max_tokens": self.config.max_tokens,
+                "max_messages": self.config.max_messages,
+                "kv_cache_size": self.config.kv_cache_size
+            },
+            "chat": self.chat.to_dict(),
+            "stats": self.get_stats(),
+            "exported_at": datetime.now().isoformat()
+        }
+        
+        if include_archived:
+            data["archived_messages"] = self._archived_messages
+        
+        return data
+    
+    def __repr__(self) -> str:
+        """String representation."""
+        return (f"Memory(session={self.session_id[:8]}..., "
+                f"active={len(self.chat.messages)}, "
+                f"archived={len(self._archived_messages)}, "
+                f"tokens={self.chat.get_token_count()}/{self.config.max_tokens})")
+    
+    def __len__(self) -> int:
+        """Return active message count."""
+        return len(self.chat.messages)
+
+
+# Convenience functions
+
+def create_memory(
+    system_prompt: str,
+    max_tokens: int = 4096,
+    max_messages: Optional[int] = None,
+    kv_cache_size: int = 10,
+    storage_dir: str = "./memory_sessions",
+    session_id: Optional[str] = None
+) -> Memory:
+    """
+    Create a memory instance with configuration.
+    
+    Args:
+        system_prompt: System prompt
+        max_tokens: Maximum tokens before auto-save
+        max_messages: Maximum messages before auto-save
+        kv_cache_size: Number of messages in KV cache
+        storage_dir: Directory for session storage
+        session_id: Optional session ID
+        
+    Returns:
+        Configured Memory instance
+    """
+    config = MemoryConfig(
+        max_tokens=max_tokens,
+        max_messages=max_messages,
+        kv_cache_size=kv_cache_size,
+        auto_save=True,
+        storage_dir=storage_dir
+    )
+    
+    return Memory(
+        system_prompt=system_prompt,
+        config=config,
+        session_id=session_id
+    )
+
+
+def load_memory(session_id: str, storage_dir: str = "./memory_sessions") -> Memory:
+    """
+    Load a memory session from disk.
+    
+    Args:
+        session_id: Session ID to load
+        storage_dir: Storage directory
+        
+    Returns:
+        Loaded Memory instance
+    """
+    # Create temporary memory to load the session
+    config = MemoryConfig(storage_dir=storage_dir)
+    memory = Memory(system_prompt="", config=config)  # Temporary
+    memory.load(session_id)
+    
+    return memory
