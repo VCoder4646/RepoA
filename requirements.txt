@@ -1,9 +1,12 @@
-# Finance Agent System Requirements
+# RepoA Agent System Requirements
 # Python 3.8+
 
 # Core dependencies
 # Required for LLM client HTTP requests
 requests>=2.31.0
+
+# Environment variable management
+python-dotenv>=1.0.0
 
 # Optional dependencies for extended features:
 # - If using with LLM APIs:

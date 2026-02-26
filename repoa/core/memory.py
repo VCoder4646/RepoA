@@ -8,9 +8,40 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 import json
+import logging
 
-from chat import Chat, ChatManager
-from message import user_message, agent_message, tool_message
+from ..cli.chat import Chat, ChatManager
+from .message import user_message, agent_message, tool_message
+
+# Configure logging
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
+def set_memory_logging_level(level: int) -> None:
+    """
+    Set the logging level for memory module.
+    
+    Args:
+        level: Logging level (logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR)
+    
+    Examples:
+        # Set to DEBUG for detailed logs
+        set_memory_logging_level(logging.DEBUG)
+        
+        # Set to WARNING for fewer logs
+        set_memory_logging_level(logging.WARNING)
+    """
+    logger.setLevel(level)
+    logger.info(f"Memory logging level set to: {logging.getLevelName(level)}")
 
 
 class MemoryConfig:
@@ -23,7 +54,7 @@ class MemoryConfig:
         max_messages: Optional[int] = None,
         kv_cache_size: int = 10,
         auto_save: bool = True,
-        storage_dir: str = "./memory_sessions"
+        storage_dir: str = ""
     ):
         """
         Initialize memory configuration.
@@ -83,6 +114,8 @@ class Memory:
         
         self.session_id = self.chat.chat_id
         
+        logger.info(f"Memory initialized: session_id={self.session_id}, max_tokens={self.config.max_tokens}, max_messages={self.config.max_messages}")
+        
         # KV Cache: Store indices of cached messages
         self._kv_cache: List[int] = []
         self._cache_valid = True
@@ -122,7 +155,10 @@ class Memory:
         """
         self.chat.add_user_message(content, metadata)
         self.stats["total_messages_added"] += 1
-        self.stats["total_tokens_processed"] += len(content) // 4  # Rough estimate
+        tokens = len(content) // 4
+        self.stats["total_tokens_processed"] += tokens
+        
+        logger.debug(f"[{self.session_id[:8]}] User message added: {len(content)} chars, ~{tokens} tokens")
         
         # Invalidate cache when new message added
         self._cache_valid = False
@@ -148,7 +184,10 @@ class Memory:
         """
         self.chat.add_agent_message(content, tool_calls, metadata)
         self.stats["total_messages_added"] += 1
-        self.stats["total_tokens_processed"] += len(content) // 4
+        tokens = len(content) // 4
+        self.stats["total_tokens_processed"] += tokens
+        
+        logger.debug(f"[{self.session_id[:8]}] Agent message added: {len(content)} chars, ~{tokens} tokens, tool_calls={len(tool_calls) if tool_calls else 0}")
         
         # Update LLM KV cache info if provided
         if llm_response:
@@ -176,7 +215,10 @@ class Memory:
         """
         self.chat.add_tool_message(content, tool_call_id, metadata)
         self.stats["total_messages_added"] += 1
-        self.stats["total_tokens_processed"] += len(content) // 4
+        tokens = len(content) // 4
+        self.stats["total_tokens_processed"] += tokens
+        
+        logger.debug(f"[{self.session_id[:8]}] Tool message added: tool_call_id={tool_call_id}, ~{tokens} tokens")
         
         # Invalidate cache
         self._cache_valid = False
@@ -196,16 +238,20 @@ class Memory:
         
         # Check token limit
         if token_count > self.config.max_tokens:
+            logger.info(f"[{self.session_id[:8]}] Token limit exceeded: {token_count}/{self.config.max_tokens} - triggering overflow handling")
             self._handle_memory_overflow()
         
         # Check message limit
         elif self.config.max_messages and message_count > self.config.max_messages:
+            logger.info(f"[{self.session_id[:8]}] Message limit exceeded: {message_count}/{self.config.max_messages} - triggering overflow handling")
             self._handle_memory_overflow()
     
     def _handle_memory_overflow(self) -> None:
         """
         Handle memory overflow by archiving old messages and saving.
         """
+        logger.warning(f"[{self.session_id[:8]}] Memory overflow detected - archiving older messages")
+        
         # Save current state
         self.save()
         
@@ -217,12 +263,16 @@ class Memory:
             # Archive older messages
             messages_to_archive = total_messages - messages_to_keep
             
+            logger.info(f"[{self.session_id[:8]}] Archiving {messages_to_archive} messages (keeping {messages_to_keep} in active memory)")
+            
             for _ in range(messages_to_archive):
                 if self.chat.messages:
                     archived_msg = self.chat.messages[0]  # Get first message
                     self._archived_messages.append(archived_msg.to_full_dict())
                     self.chat.messages.pop(0)  # Remove from active memory
                     self.stats["messages_archived"] += 1
+            
+            logger.info(f"[{self.session_id[:8]}] Archived {messages_to_archive} messages. Total archived: {len(self._archived_messages)}")
             
             # Update chat stats after archiving
             self.chat.stats["total_messages"] = len(self.chat.messages)
@@ -256,8 +306,10 @@ class Memory:
         
         if self._cache_valid:
             self.stats["cache_hits"] += 1
+            logger.debug(f"[{self.session_id[:8]}] Cache hit: reusing {len(self._kv_cache)} cached messages")
         else:
             self.stats["cache_misses"] += 1
+            logger.debug(f"[{self.session_id[:8]}] Cache miss: rebuilding cache")
             self._update_kv_cache()
         
         return messages, self._cache_valid
@@ -268,6 +320,7 @@ class Memory:
         Cache is updated every N messages based on kv_cache_size.
         """
         current_msg_count = len(self.chat.messages)
+        logger.debug(f"[{self.session_id[:8]}] Updating KV cache with {current_msg_count} messages")
         
         # Determine which messages are cached
         if current_msg_count <= self.config.kv_cache_size:
@@ -281,6 +334,7 @@ class Memory:
         self._cache_valid = True
         self._last_cache_update = current_msg_count
         self.stats["cache_updates"] += 1
+        logger.debug(f"[{self.session_id[:8]}] KV cache updated: {len(self._kv_cache)} messages cached")
     
     def _update_llm_cache_from_response(self, llm_response: Dict[str, Any]) -> None:
         """
@@ -303,8 +357,10 @@ class Memory:
                 self._llm_cached_tokens = cached
                 self.stats["llm_cache_hits"] += 1
                 self.stats["total_cached_tokens"] += cached
+                logger.info(f"[{self.session_id[:8]}] LLM cache hit: {cached} tokens reused from cache")
             else:
                 self.stats["llm_cache_misses"] += 1
+                logger.debug(f"[{self.session_id[:8]}] LLM cache miss: no cached tokens")
         
         # Anthropic cache format
         elif "cache_creation_input_tokens" in usage:
@@ -315,8 +371,10 @@ class Memory:
                 self._llm_cached_tokens = self._llm_cache_read_tokens
                 self.stats["llm_cache_hits"] += 1
                 self.stats["total_cached_tokens"] += self._llm_cache_read_tokens
+                logger.info(f"[{self.session_id[:8]}] Anthropic cache hit: {self._llm_cache_read_tokens} tokens read from cache")
             else:
                 self.stats["llm_cache_misses"] += 1
+                logger.debug(f"[{self.session_id[:8]}] Anthropic cache miss")
         
         # vLLM cached tokens format
         elif "cached_tokens" in usage:
@@ -325,14 +383,18 @@ class Memory:
                 self._llm_cached_tokens = cached
                 self.stats["llm_cache_hits"] += 1
                 self.stats["total_cached_tokens"] += cached
+                logger.info(f"[{self.session_id[:8]}] vLLM cache hit: {cached} tokens reused from cache")
             else:
                 self.stats["llm_cache_misses"] += 1
+                logger.debug(f"[{self.session_id[:8]}] vLLM cache miss")
         
         # Calculate cost savings (assume $1 per 1M input tokens, 90% cache discount)
         if self._llm_cached_tokens > 0:
             original_cost = (usage.get("prompt_tokens", 0) / 1_000_000) * 1.0
             cached_cost = (self._llm_cached_tokens / 1_000_000) * 0.1  # 90% discount
-            self.stats["cache_cost_savings"] += (original_cost - cached_cost)
+            savings = original_cost - cached_cost
+            self.stats["cache_cost_savings"] += savings
+            logger.info(f"[{self.session_id[:8]}] Cache cost savings: ${savings:.6f} (total: ${self.stats['cache_cost_savings']:.4f})")
     
     def get_llm_cache_info(self) -> Dict[str, Any]:
         """
@@ -396,7 +458,10 @@ class Memory:
             Path to saved file
         """
         if not self.config.auto_save and not force:
+            logger.debug(f"[{self.session_id[:8]}] Save skipped: auto_save disabled and force=False")
             return ""
+        
+        logger.info(f"[{self.session_id[:8]}] Saving session to disk: {len(self.chat.messages)} active messages")
         
         # Save chat
         self.chat_manager.save_chat(self.session_id)
@@ -406,6 +471,8 @@ class Memory:
             archive_path = Path(self.config.storage_dir) / f"{self.session_id}_archive.json"
             archive_path.parent.mkdir(parents=True, exist_ok=True)
             
+            logger.info(f"[{self.session_id[:8]}] Saving {len(self._archived_messages)} archived messages to {archive_path}")
+            
             with open(archive_path, 'w', encoding='utf-8') as f:
                 json.dump({
                     "session_id": self.session_id,
@@ -414,7 +481,9 @@ class Memory:
                     "stats": self.stats
                 }, f, indent=2)
         
-        return str(Path(self.config.storage_dir) / f"{self.session_id}.json")
+        saved_path = str(Path(self.config.storage_dir) / f"{self.session_id}.json")
+        logger.info(f"[{self.session_id[:8]}] Session saved successfully to {saved_path}")
+        return saved_path
     
     def load(self, session_id: str) -> None:
         """
@@ -423,18 +492,24 @@ class Memory:
         Args:
             session_id: Session ID to load
         """
+        logger.info(f"Loading session: {session_id}")
+        
         # Load chat
         self.chat = self.chat_manager.load_chat(session_id)
         self.session_id = session_id
         
+        logger.info(f"[{self.session_id[:8]}] Session loaded: {len(self.chat.messages)} active messages")
+        
         # Load archived messages if they exist
         archive_path = Path(self.config.storage_dir) / f"{session_id}_archive.json"
         if archive_path.exists():
+            logger.info(f"[{self.session_id[:8]}] Loading archived messages from {archive_path}")
             with open(archive_path, 'r', encoding='utf-8') as f:
                 archive_data = json.load(f)
                 self._archived_messages = archive_data.get("archived_messages", [])
                 if "stats" in archive_data:
                     self.stats.update(archive_data["stats"])
+            logger.info(f"[{self.session_id[:8]}] Loaded {len(self._archived_messages)} archived messages")
         
         # Update KV cache after loading
         self._cache_valid = False
@@ -492,15 +567,20 @@ class Memory:
             keep_system: Whether to keep system prompt
             keep_archived: Whether to keep archived messages
         """
+        logger.info(f"[{self.session_id[:8]}] Clearing memory: keep_system={keep_system}, keep_archived={keep_archived}")
+        
         self.chat.clear_messages(keep_system=keep_system)
         
         if not keep_archived:
+            archived_count = len(self._archived_messages)
             self._archived_messages.clear()
+            logger.info(f"[{self.session_id[:8]}] Cleared {archived_count} archived messages")
         
         # Reset cache
         self._kv_cache.clear()
         self._cache_valid = False
         self._last_cache_update = 0
+        logger.info(f"[{self.session_id[:8]}] Memory cleared successfully")
     
     def get_context_window(self, num_messages: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -594,7 +674,7 @@ def create_memory(
     max_tokens: int = 4096,
     max_messages: Optional[int] = None,
     kv_cache_size: int = 10,
-    storage_dir: str = "./memory_sessions",
+    storage_dir: str = "",
     session_id: Optional[str] = None
 ) -> Memory:
     """
@@ -611,6 +691,8 @@ def create_memory(
     Returns:
         Configured Memory instance
     """
+    logger.info(f"Creating new memory instance: max_tokens={max_tokens}, kv_cache_size={kv_cache_size}")
+    
     config = MemoryConfig(
         max_tokens=max_tokens,
         max_messages=max_messages,
@@ -626,7 +708,7 @@ def create_memory(
     )
 
 
-def load_memory(session_id: str, storage_dir: str = "./memory_sessions") -> Memory:
+def load_memory(session_id: str, storage_dir: str = "") -> Memory:
     """
     Load a memory session from disk.
     
@@ -637,6 +719,8 @@ def load_memory(session_id: str, storage_dir: str = "./memory_sessions") -> Memo
     Returns:
         Loaded Memory instance
     """
+    logger.info(f"Loading memory from disk: session_id={session_id}, storage_dir={storage_dir}")
+    
     # Create temporary memory to load the session
     config = MemoryConfig(storage_dir=storage_dir)
     memory = Memory(system_prompt="", config=config)  # Temporary

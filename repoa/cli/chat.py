@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 
-from message import Message, Role, system_message, user_message, agent_message, tool_message
+from ..core.message import Message, Role, system_message, user_message, agent_message, tool_message
 
 
 class Chat:
@@ -420,7 +420,7 @@ class ChatManager:
     Manages multiple chat sessions with persistence.
     """
     
-    def __init__(self, storage_dir: str = "./chats"):
+    def __init__(self, storage_dir: str = ""):
         """
         Initialize chat manager.
         

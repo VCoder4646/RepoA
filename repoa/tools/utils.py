@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
 
-from config import Config
+from ..config.config import Config
 
 
 def setup_logging(name: str = "agent_system", level: Optional[str] = None) -> logging.Logger:

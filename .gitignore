@@ -18,7 +18,9 @@ var/
 wheels/
 *.egg-info/
 .installed.cfg
-*.egg
+*.
+.zencoder/
+.zenflow/
 
 # Virtual Environment
 venv/
@@ -44,6 +46,10 @@ data/*.json
 exports/*.json
 *.db
 *.sqlite
+
+# Agent system directories
+memory_sessions/
+agent_chats/
 
 # Testing
 .pytest_cache/
