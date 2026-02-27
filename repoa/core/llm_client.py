@@ -9,7 +9,9 @@ import requests
 from typing import List, Dict, Any, Optional, Callable, Generator
 from enum import Enum
 from abc import ABC, abstractmethod
-
+# from repoa.instrumentation.tracing import traced_span, OpenInferenceSpanKindValues
+from openinference.semconv.trace import OpenInferenceSpanKindValues
+from repoa.instrumentation.decorators import trace_repoa
 
 class ModelType(Enum):
     """Enumeration of supported model types."""
@@ -127,6 +129,7 @@ class BaseLLMClient(ABC):
         self.config = kwargs
     
     @abstractmethod
+    @trace_repoa(kind=OpenInferenceSpanKindValues.LLM)
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -145,7 +148,7 @@ class BaseLLMClient(ABC):
             LLMResponse object
         """
         pass
-    
+    @trace_repoa(kind=OpenInferenceSpanKindValues.LLM)
     def _make_request(
         self,
         endpoint: str,
@@ -205,6 +208,7 @@ class OllamaClient(BaseLLMClient):
         """
         super().__init__(model_name, base_url, **kwargs)
     
+    @trace_repoa(kind=OpenInferenceSpanKindValues.LLM)
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -309,6 +313,7 @@ class VLLMClient(BaseLLMClient):
         """
         super().__init__(model_name, base_url, **kwargs)
     
+    @trace_repoa(kind=OpenInferenceSpanKindValues.LLM)
     def generate(
         self,
         messages: List[Dict[str, str]],
@@ -403,6 +408,7 @@ class RemoteEndpointClient(BaseLLMClient):
             kwargs["api_key"] = api_key
         super().__init__(model_name, base_url, **kwargs)
     
+    @trace_repoa(kind=OpenInferenceSpanKindValues.LLM)
     def generate(
         self,
         messages: List[Dict[str, str]],

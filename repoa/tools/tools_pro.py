@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional, Callable
 import json
 from dataclasses import dataclass, field
 from enum import Enum
+from openinference.semconv.trace import OpenInferenceSpanKindValues
 
 
 class ToolType(Enum):
@@ -94,6 +95,7 @@ class Tool:
             "metadata": self.metadata
         }
     
+
     def validate_args(self, args: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         Validate arguments against tool parameters.
@@ -206,6 +208,7 @@ class ToolProcessor:
         tool_names = self._tool_groups.get(group_name, [])
         return [self._tools[name] for name in tool_names if name in self._tools]
     
+
     def parse_mcp_tool(self, mcp_tool_data: Dict[str, Any]) -> Tool:
         """
         Parse MCP tool data into a Tool instance.
@@ -264,6 +267,7 @@ class ToolProcessor:
                 print(f"Error loading tool {tool_data.get('name', 'unknown')}: {e}")
         return count
     
+
     def format_for_llm(self, tool_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
         Format tools for LLM consumption.
@@ -281,6 +285,7 @@ class ToolProcessor:
         
         return [tool.to_dict() for tool in tools_to_format]
     
+
     def export_tools_json(self, filepath: str, tool_names: Optional[List[str]] = None) -> None:
         """
         Export tools to a JSON file.
@@ -293,6 +298,7 @@ class ToolProcessor:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(formatted_tools, f, indent=2)
     
+
     def import_tools_json(self, filepath: str) -> int:
         """
         Import tools from a JSON file.

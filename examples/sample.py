@@ -1,9 +1,13 @@
 from repoa.core.agent import create_agent, AgentConfig
+import phoenix.otel as otel
+from opentelemetry import trace
 import logging
 from repoa.config.system_prompt import SystemPrompt
 from repoa.tools.tools_pro import Tool, ToolType, ToolProcessor, ToolParameter
 from repoa.config.config import Config
 from repoa.core.llm_client import OllamaClient
+
+otel.register(project_name="repoa-stock-advisor")
 sp=SystemPrompt("repoa","Create an agent that can analyze stock data and provide investment advice.")
 tools_orchestrator=ToolProcessor()
 tools_orchestrator.load_mcp_tools([
