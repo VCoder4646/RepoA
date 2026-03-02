@@ -17,8 +17,9 @@ class ModelType(Enum):
     VLLM = "vllm"
     REMOTE = "remote"
     OPENAI_COMPATIBLE = "openai_compatible"
-
-
+    HUGGINGFACE = "huggingface"
+    SGLANG = "sglang"
+    LM_STUDIO = "lm_studio"
 class LLMResponse:
     """
     Represents a response from an LLM.
@@ -471,7 +472,260 @@ class RemoteEndpointClient(BaseLLMClient):
         
         except Exception as e:
             raise RuntimeError(f"Remote endpoint API error: {str(e)}")
+        
+class HuggingFaceClient(BaseLLMClient):
+    """
+    Client for Hugging Face Inference Endpoints and Serverless API.
+    Supports models running Text Generation Inference (TGI) with Messages API.
+    """
+    
+    def __init__(
+        self,
+        model_name: str,
+        hf_token: str,
+        base_url: Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Initialize Hugging Face client.
+        
+        Args:
+            model_name: Hugging Face model ID (e.g., 'meta-llama/Meta-Llama-3-8B-Instruct')
+            hf_token: Hugging Face API token starting with 'hf_'
+            base_url: Optional custom Inference Endpoint URL. If None, uses Serverless API.
+            **kwargs: Additional configuration
+        """
+        # If no base_url is provided, intelligently route to the HF Serverless API
+        if not base_url:
+            base_url = "https://router.huggingface.co/hf-inference"
+            
+        kwargs["api_key"] = hf_token
+        super().__init__(model_name, base_url, **kwargs)
 
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = False
+    ) -> LLMResponse:
+        """
+        Generate response using Hugging Face TGI Messages API.
+        """
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": self.temperature,
+            "stream": False
+        }
+        
+        if self.max_tokens:
+            payload["max_tokens"] = self.max_tokens
+            
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+            
+        try:
+            # Append the standard OpenAI compatible route for TGI
+            response = self._make_request("/v1/chat/completions", payload, stream=stream)
+            data = response.json()
+            
+            # Parse response
+            choice = data["choices"][0]
+            message = choice["message"]
+            
+            content = message.get("content", "") or ""
+            tool_calls = []
+            
+            if "tool_calls" in message and message["tool_calls"]:
+                for tc in message["tool_calls"]:
+                    tool_calls.append({
+                        "id": tc.get("id", ""),
+                        "type": tc.get("type", "function"),
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"]
+                        }
+                    })
+                    
+            return LLMResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finish_reason=choice.get("finish_reason", "stop"),
+                usage=data.get("usage", {}),
+                raw_response=data
+            )
+            
+        except Exception as e:
+            raise RuntimeError(f"Hugging Face API error: {str(e)}")
+
+class SGLangClient(BaseLLMClient):
+    """
+    Client for SGLang OpenAI-compatible API.
+    SGLang provides fast, highly optimized serving for LLMs.
+    """
+    
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str = "http://localhost:30000",
+        **kwargs
+    ):
+        """
+        Initialize SGLang client.
+        
+        Args:
+            model_name: Model name (must be loaded in SGLang server)
+            base_url: SGLang server URL (defaults to port 30000)
+            **kwargs: Additional configuration
+        """
+        super().__init__(model_name, base_url, **kwargs)
+    
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = False
+    ) -> LLMResponse:
+        """
+        Generate response using SGLang.
+        """
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": self.temperature,
+            "stream": False
+        }
+        
+        if self.max_tokens:
+            payload["max_tokens"] = self.max_tokens
+            
+        # Add tools if provided
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+            
+        try:
+            # SGLang natively supports the standard OpenAI completions endpoint
+            response = self._make_request("/v1/chat/completions", payload, stream=stream)
+            data = response.json()
+            
+            # Parse OpenAI-compatible response
+            choice = data["choices"][0]
+            message = choice["message"]
+            
+            content = message.get("content", "") or ""
+            tool_calls = []
+            
+            # Parse tool calls if present
+            if "tool_calls" in message and message["tool_calls"]:
+                for tc in message["tool_calls"]:
+                    tool_calls.append({
+                        "id": tc.get("id", ""),
+                        "type": tc.get("type", "function"),
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"]
+                        }
+                    })
+            
+            return LLMResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finish_reason=choice.get("finish_reason", "stop"),
+                usage=data.get("usage", {}),
+                raw_response=data,
+                cached_tokens=data.get("usage", {}).get("prompt_tokens_details", {}).get("cached_tokens", 0)
+            )
+            
+        except Exception as e:
+            raise RuntimeError(f"SGLang API error: {str(e)}")
+        
+class LMStudioClient(BaseLLMClient):
+    """
+    Client for LM Studio local API.
+    LM Studio provides a GUI for running local models with an OpenAI-compatible server.
+    """
+    
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str = "http://localhost:1234",
+        **kwargs
+    ):
+        """
+        Initialize LM Studio client.
+        
+        Args:
+            model_name: Model name (must be loaded and running in LM Studio)
+            base_url: LM Studio server URL (defaults to port 1234)
+            **kwargs: Additional configuration
+        """
+        # LM Studio doesn't strictly require an API key, but some OpenAI clients expect one
+        if "api_key" not in kwargs:
+            kwargs["api_key"] = "lm-studio"
+            
+        super().__init__(model_name, base_url, **kwargs)
+    
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        stream: bool = False
+    ) -> LLMResponse:
+        """
+        Generate response using LM Studio's local server.
+        """
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": self.temperature,
+            "stream": False
+        }
+        
+        if self.max_tokens:
+            payload["max_tokens"] = self.max_tokens
+            
+        # Add tools if provided (Requires a tool-calling capable model loaded in LM Studio)
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+            
+        try:
+            # LM Studio uses the standard OpenAI chat completions endpoint
+            response = self._make_request("/v1/chat/completions", payload, stream=stream)
+            data = response.json()
+            
+            # Parse OpenAI-compatible response
+            choice = data["choices"][0]
+            message = choice["message"]
+            
+            content = message.get("content", "") or ""
+            tool_calls = []
+            
+            # Parse tool calls if present
+            if "tool_calls" in message and message["tool_calls"]:
+                for tc in message["tool_calls"]:
+                    tool_calls.append({
+                        "id": tc.get("id", ""),
+                        "type": tc.get("type", "function"),
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"]
+                        }
+                    })
+            
+            return LLMResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finish_reason=choice.get("finish_reason", "stop"),
+                usage=data.get("usage", {}),
+                raw_response=data,
+                cached_tokens=data.get("usage", {}).get("prompt_tokens_details", {}).get("cached_tokens", 0)
+            )
+            
+        except Exception as e:
+            raise RuntimeError(f"LM Studio API error: {str(e)}")
 
 class LLMClientFactory:
     """
@@ -510,6 +764,20 @@ class LLMClientFactory:
                 raise ValueError("base_url is required for remote endpoints")
             return RemoteEndpointClient(model_name, base_url, **kwargs)
         
+        elif model_type == ModelType.HUGGINGFACE:
+            token = kwargs.get("api_key") or kwargs.get("hf_token")
+            if not token:
+                raise ValueError("hf_token or api_key is required for Hugging Face endpoints")
+            return HuggingFaceClient(model_name, hf_token=token, base_url=base_url, **kwargs)
+        
+        elif model_type == ModelType.SGLANG:
+            url = base_url or "http://localhost:30000"
+            return SGLangClient(model_name, url, **kwargs)
+        
+        elif model_type == ModelType.LM_STUDIO:
+            url = base_url or "http://localhost:1234"
+            return LMStudioClient(model_name, url, **kwargs)
+        
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
     
@@ -527,7 +795,21 @@ class LLMClientFactory:
     def create_remote(model_name: str, base_url: str, api_key: Optional[str] = None, **kwargs) -> RemoteEndpointClient:
         """Quick helper to create remote endpoint client."""
         return RemoteEndpointClient(model_name, base_url, api_key, **kwargs)
-
+    
+    @staticmethod
+    def create_huggingface(model_name: str, hf_token: str, base_url: Optional[str] = None, **kwargs) -> HuggingFaceClient:
+        """Quick helper to create Hugging Face client."""
+        return HuggingFaceClient(model_name, hf_token, base_url, **kwargs)
+    
+    @staticmethod
+    def create_sglang(model_name: str, base_url: str = "http://localhost:30000", **kwargs) -> SGLangClient:
+        """Quick helper to create SGLang client."""
+        return SGLangClient(model_name, base_url, **kwargs)
+    
+    @staticmethod
+    def create_lm_studio(model_name: str, base_url: str = "http://localhost:1234", **kwargs) -> LMStudioClient:
+        """Quick helper to create LM Studio client."""
+        return LMStudioClient(model_name, base_url, **kwargs)
 
 def format_tools_for_api(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
