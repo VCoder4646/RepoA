@@ -61,7 +61,9 @@ class LLMResponse:
         """Extract cached token count from usage data."""
         # OpenAI format
         if "prompt_tokens_details" in self.usage:
-            return self.usage["prompt_tokens_details"].get("cached_tokens", 0)
+            details = self.usage["prompt_tokens_details"]
+            if isinstance(details, dict):
+                return details.get("cached_tokens", 0)
         
         # Anthropic format
         if "cache_read_input_tokens" in self.usage:
@@ -122,6 +124,9 @@ class BaseLLMClient(ABC):
             **kwargs: Additional configuration
         """
         self.model_name = model_name
+        # Validate and normalize base URL
+        if not base_url or not base_url.strip():
+            raise ValueError("base_url cannot be empty. Please provide a valid URL (e.g., 'http://localhost:8000')")
         self.base_url = base_url.rstrip('/')
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -163,6 +168,10 @@ class BaseLLMClient(ABC):
             
         Returns:
             Response object
+            
+        Raises:
+            ConnectionError: If cannot connect to API server
+            RuntimeError: If API returns error response
         """
         url = f"{self.base_url}{endpoint}"
         headers = {
@@ -173,15 +182,32 @@ class BaseLLMClient(ABC):
         if "api_key" in self.config:
             headers["Authorization"] = f"Bearer {self.config['api_key']}"
         
-        response = requests.post(
-            url,
-            json=payload,
-            headers=headers,
-            stream=stream,
-            timeout=self.config.get("timeout", 300)
-        )
-        response.raise_for_status()
-        return response
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                stream=stream,
+                timeout=self.config.get("timeout", 300)
+            )
+            response.raise_for_status()
+            return response
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(
+                f"Failed to connect to {self.base_url}. "
+                f"Please ensure the service is running. Error: {str(e)}"
+            )
+        except requests.exceptions.Timeout as e:
+            raise TimeoutError(
+                f"Request to {self.base_url} timed out after {self.config.get('timeout', 300)}s. "
+                f"The service may be overloaded. Error: {str(e)}"
+            )
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            raise RuntimeError(
+                f"API error ({status_code}): {str(e)}. "
+                f"URL: {url}"
+            )
 
 
 class OllamaClient(BaseLLMClient):
@@ -201,9 +227,12 @@ class OllamaClient(BaseLLMClient):
         
         Args:
             model_name: Ollama model name (e.g., 'llama2', 'mistral', 'codellama')
-            base_url: Ollama server URL
+            base_url: Ollama server URL (defaults to http://localhost:11434)
             **kwargs: Additional configuration
         """
+        # Use default URL if empty string is provided
+        if not base_url or base_url.strip() == "":
+            base_url = "http://localhost:11434"
         super().__init__(model_name, base_url, **kwargs)
     
     def generate(
@@ -243,16 +272,22 @@ class OllamaClient(BaseLLMClient):
             response = self._make_request("/api/chat", payload, stream=stream)
             data = response.json()
             
+            # Validate response data
+            if not isinstance(data, dict) or data is None:
+                raise ValueError(f"Invalid response format: expected dict, got {type(data).__name__}")
+            
             # Parse response
             content = ""
             tool_calls = []
             
             if "message" in data:
-                content = data["message"].get("content", "")
-                
-                # Check for tool calls
-                if "tool_calls" in data["message"]:
-                    tool_calls = data["message"]["tool_calls"]
+                message = data.get("message", {})
+                if isinstance(message, dict):
+                    content = message.get("content", "")
+                    
+                    # Check for tool calls
+                    if "tool_calls" in message:
+                        tool_calls = message["tool_calls"]
             
             return LLMResponse(
                 content=content,
@@ -269,6 +304,8 @@ class OllamaClient(BaseLLMClient):
                 cached_tokens=0
             )
         
+        except (ConnectionError, TimeoutError) as e:
+            raise RuntimeError(f"Ollama connection error: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"Ollama API error: {str(e)}")
     
@@ -305,9 +342,12 @@ class VLLMClient(BaseLLMClient):
         
         Args:
             model_name: Model name (must be loaded in vLLM server)
-            base_url: vLLM server URL
+            base_url: vLLM server URL (defaults to http://localhost:8000)
             **kwargs: Additional configuration
         """
+        # Use default URL if empty string is provided
+        if not base_url or base_url.strip() == "":
+            base_url = "http://localhost:8000"
         super().__init__(model_name, base_url, **kwargs)
     
     def generate(
@@ -346,9 +386,19 @@ class VLLMClient(BaseLLMClient):
             response = self._make_request("/v1/chat/completions", payload, stream=stream)
             data = response.json()
             
+            # Validate response data
+            if not isinstance(data, dict) or data is None:
+                raise ValueError(f"Invalid response format: expected dict, got {type(data).__name__}")
+            
+            if "choices" not in data or not data["choices"]:
+                raise ValueError("Response missing 'choices' field or empty choices list")
+            
             # Parse OpenAI-compatible response
             choice = data["choices"][0]
-            message = choice["message"]
+            message = choice.get("message", {})
+            
+            if not isinstance(message, dict):
+                raise ValueError(f"Invalid message format: expected dict, got {type(message).__name__}")
             
             content = message.get("content", "") or ""
             tool_calls = []
@@ -365,13 +415,14 @@ class VLLMClient(BaseLLMClient):
                         }
                     })
             
+            usage = data.get("usage", {}) or {}
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
                 finish_reason=choice.get("finish_reason", "stop"),
-                usage=data.get("usage", {}),
+                usage=usage,
                 raw_response=data,
-                cached_tokens=data.get("usage", {}).get("cached_tokens", 0)
+                cached_tokens=usage.get("cached_tokens", 0) if isinstance(usage, dict) else 0
             )
         
         except Exception as e:
@@ -442,9 +493,19 @@ class RemoteEndpointClient(BaseLLMClient):
             response = self._make_request(endpoint, payload, stream=stream)
             data = response.json()
             
+            # Validate response data
+            if not isinstance(data, dict) or data is None:
+                raise ValueError(f"Invalid response format: expected dict, got {type(data).__name__}")
+            
+            if "choices" not in data or not data["choices"]:
+                raise ValueError("Response missing 'choices' field or empty choices list")
+            
             # Parse OpenAI-compatible response
             choice = data["choices"][0]
-            message = choice["message"]
+            message = choice.get("message", {})
+            
+            if not isinstance(message, dict):
+                raise ValueError(f"Invalid message format: expected dict, got {type(message).__name__}")
             
             content = message.get("content", "") or ""
             tool_calls = []
@@ -461,13 +522,14 @@ class RemoteEndpointClient(BaseLLMClient):
                         }
                     })
             
+            usage = data.get("usage", {}) or {}
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
                 finish_reason=choice.get("finish_reason", "stop"),
-                usage=data.get("usage", {}),
+                usage=usage,
                 raw_response=data,
-                cached_tokens=data.get("usage", {}).get("cached_tokens", 0)
+                cached_tokens=usage.get("cached_tokens", 0) if isinstance(usage, dict) else 0
             )
         
         except Exception as e:
@@ -530,9 +592,19 @@ class HuggingFaceClient(BaseLLMClient):
             response = self._make_request("/v1/chat/completions", payload, stream=stream)
             data = response.json()
             
+            # Validate response data
+            if not isinstance(data, dict) or data is None:
+                raise ValueError(f"Invalid response format: expected dict, got {type(data).__name__}")
+            
+            if "choices" not in data or not data["choices"]:
+                raise ValueError("Response missing 'choices' field or empty choices list")
+            
             # Parse response
             choice = data["choices"][0]
-            message = choice["message"]
+            message = choice.get("message", {})
+            
+            if not isinstance(message, dict):
+                raise ValueError(f"Invalid message format: expected dict, got {type(message).__name__}")
             
             content = message.get("content", "") or ""
             tool_calls = []
@@ -547,13 +619,15 @@ class HuggingFaceClient(BaseLLMClient):
                             "arguments": tc["function"]["arguments"]
                         }
                     })
-                    
+            
+            usage = data.get("usage", {}) or {}
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
                 finish_reason=choice.get("finish_reason", "stop"),
-                usage=data.get("usage", {}),
-                raw_response=data
+                usage=usage,
+                raw_response=data,
+                cached_tokens=usage.get("cached_tokens", 0) if isinstance(usage, dict) else 0
             )
             
         except Exception as e:
@@ -579,6 +653,9 @@ class SGLangClient(BaseLLMClient):
             base_url: SGLang server URL (defaults to port 30000)
             **kwargs: Additional configuration
         """
+        # Use default URL if empty string is provided
+        if not base_url or base_url.strip() == "":
+            base_url = "http://localhost:30000"
         super().__init__(model_name, base_url, **kwargs)
     
     def generate(
@@ -610,9 +687,19 @@ class SGLangClient(BaseLLMClient):
             response = self._make_request("/v1/chat/completions", payload, stream=stream)
             data = response.json()
             
+            # Validate response data
+            if not isinstance(data, dict) or data is None:
+                raise ValueError(f"Invalid response format: expected dict, got {type(data).__name__}")
+            
+            if "choices" not in data or not data["choices"]:
+                raise ValueError("Response missing 'choices' field or empty choices list")
+            
             # Parse OpenAI-compatible response
             choice = data["choices"][0]
-            message = choice["message"]
+            message = choice.get("message", {})
+            
+            if not isinstance(message, dict):
+                raise ValueError(f"Invalid message format: expected dict, got {type(message).__name__}")
             
             content = message.get("content", "") or ""
             tool_calls = []
@@ -629,13 +716,20 @@ class SGLangClient(BaseLLMClient):
                         }
                     })
             
+            usage = data.get("usage", {}) or {}
+            cached = 0
+            if isinstance(usage, dict) and "prompt_tokens_details" in usage:
+                details = usage.get("prompt_tokens_details", {})
+                if isinstance(details, dict):
+                    cached = details.get("cached_tokens", 0)
+            
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
                 finish_reason=choice.get("finish_reason", "stop"),
-                usage=data.get("usage", {}),
+                usage=usage,
                 raw_response=data,
-                cached_tokens=data.get("usage", {}).get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                cached_tokens=cached
             )
             
         except Exception as e:
@@ -661,6 +755,10 @@ class LMStudioClient(BaseLLMClient):
             base_url: LM Studio server URL (defaults to port 1234)
             **kwargs: Additional configuration
         """
+        # Use default URL if empty string is provided
+        if not base_url or base_url.strip() == "":
+            base_url = "http://localhost:1234"
+            
         # LM Studio doesn't strictly require an API key, but some OpenAI clients expect one
         if "api_key" not in kwargs:
             kwargs["api_key"] = "lm-studio"
@@ -696,9 +794,19 @@ class LMStudioClient(BaseLLMClient):
             response = self._make_request("/v1/chat/completions", payload, stream=stream)
             data = response.json()
             
+            # Validate response data
+            if not isinstance(data, dict) or data is None:
+                raise ValueError(f"Invalid response format: expected dict, got {type(data).__name__}")
+            
+            if "choices" not in data or not data["choices"]:
+                raise ValueError("Response missing 'choices' field or empty choices list")
+            
             # Parse OpenAI-compatible response
             choice = data["choices"][0]
-            message = choice["message"]
+            message = choice.get("message", {})
+            
+            if not isinstance(message, dict):
+                raise ValueError(f"Invalid message format: expected dict, got {type(message).__name__}")
             
             content = message.get("content", "") or ""
             tool_calls = []
@@ -715,13 +823,20 @@ class LMStudioClient(BaseLLMClient):
                         }
                     })
             
+            usage = data.get("usage", {}) or {}
+            cached = 0
+            if isinstance(usage, dict) and "prompt_tokens_details" in usage:
+                details = usage.get("prompt_tokens_details", {})
+                if isinstance(details, dict):
+                    cached = details.get("cached_tokens", 0)
+            
             return LLMResponse(
                 content=content,
                 tool_calls=tool_calls,
                 finish_reason=choice.get("finish_reason", "stop"),
-                usage=data.get("usage", {}),
+                usage=usage,
                 raw_response=data,
-                cached_tokens=data.get("usage", {}).get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                cached_tokens=cached
             )
             
         except Exception as e:

@@ -3,7 +3,7 @@ import logging
 from repoa.config.system_prompt import SystemPrompt
 from repoa.tools.tools_pro import Tool, ToolType, ToolProcessor, ToolParameter
 from repoa.config.config import Config
-from repoa.core.llm_client import OllamaClient
+from repoa.core.llm_client import OllamaClient, VLLMClient,RemoteEndpointClient,HuggingFaceClient,SGLangClient,LMStudioClient
 sp=SystemPrompt("repoa","Create an agent that can analyze stock data and provide investment advice.")
 tools_orchestrator=ToolProcessor()
 tools_orchestrator.load_mcp_tools([
@@ -34,7 +34,7 @@ tools_orchestrator.add_tool(
             )
         ],
         tool_type=ToolType.CUSTOM,
-        function=lambda stock_symbol: f"price of {stock_symbol}: $150 (mock data)"
+        function=lambda stock_symbol: f"Current price of {stock_symbol}: $150 (mock data)"
     )
 )
 config = AgentConfig(
@@ -44,7 +44,20 @@ config = AgentConfig(
         memory_log_level=logging.INFO,      # Memory logs at INFO level
         enable_memory_logging=False           # Enable memory logging
     )
-llm=OllamaClient(model_name="qwen2.5:3b")
+llm=VLLMClient(model_name="devstral_2_24b",base_url="http://192.168.200.29:11224")
+llm1=OllamaClient(model_name="qwen3:4b")
+llm2=RemoteEndpointClient(model_name="devstral_2_24b",base_url="http://192.168.200.29:11224")
+# llm3=HuggingFaceClient(model_name="",hf_token="")
+# llm4=SGLangClient(model_name="sglang-7b",base_url="http://localhost:30000")
+llm5=LMStudioClient(model_name="google/gemma-3-4b",base_url="http://localhost:1234")
 agent=create_agent(name="TestAgent",system_prompt=sp,tools_processor=tools_orchestrator,llm_client=llm,config=config)
-print(agent.invoke("What is the AAPL Stock price right now?"))
+agent1=create_agent(name="TestAgent1",system_prompt=sp,tools_processor=tools_orchestrator,llm_client=llm1,config=config)
+agent2=create_agent(name="TestAgent2",system_prompt=sp,tools_processor=tools_orchestrator,llm_client=llm2,config=config)
+# agent3=create_agent(name="TestAgent3",system_prompt=sp,tools_processor=tools_orchestrator,llm_client=llm3,config=config)
+# agent4=create_agent(name="TestAgent4",system_prompt=sp,tools_processor=tools_orchestrator,llm_client=llm4,config=config)
+agent5=create_agent(name="TestAgent5",system_prompt=sp,tools_processor=tools_orchestrator,llm_client=llm5,config=config)
+print("VLLM: ",agent.invoke("What will be the price of AAPL stock tomorrow?"))
+print("Ollama: ",agent1.invoke("What will be the price of AAPL stock tomorrow?"))
+print("RemoteEndpoint: ",agent2.invoke("What will be the price of AAPL stock tomorrow?"))
+print("LMStudio: ",agent5.invoke("What will be the price of AAPL stock tomorrow?"))
 print(agent.get_agent_info())
