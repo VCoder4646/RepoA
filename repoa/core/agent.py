@@ -9,6 +9,9 @@ import uuid
 import json
 import logging
 from pathlib import Path
+# from repoa.instrumentation.tracing import traced_span, OpenInferenceSpanKindValues
+from openinference.semconv.trace import OpenInferenceSpanKindValues
+from repoa.instrumentation.decorators import trace_repoa
 
 from ..config.system_prompt import SystemPrompt
 from ..tools.tools_pro import ToolProcessor, Tool, ToolType
@@ -373,6 +376,7 @@ class Agent:
         
         return tool.validate_args(arguments)
     
+    @trace_repoa(kind=OpenInferenceSpanKindValues.TOOL)
     def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute a tool with given arguments.
@@ -653,6 +657,7 @@ class Agent:
         else:
             return f"Error: {tool_result.get('error', 'Unknown error')}"
     
+    @trace_repoa(kind=OpenInferenceSpanKindValues.CHAIN)
     def run(
         self,
         user_message: str,
@@ -939,6 +944,7 @@ class Agent:
         
         return result
     
+    @trace_repoa(kind=OpenInferenceSpanKindValues.CHAIN)
     def invoke(
         self,
         input: str,
