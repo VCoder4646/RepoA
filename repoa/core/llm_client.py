@@ -478,9 +478,23 @@ class RemoteEndpointClient(BaseLLMClient):
         Returns:
             LLMResponse object
         """
+
+        formatted_messages = []
+        for msg in messages:
+            formatted_msg = msg.copy()
+            
+            # Translate 'agent' to 'assistant' for OpenAI compatibility
+            if formatted_msg.get("role") == "agent":
+                formatted_msg["role"] = "assistant"
+                
+            if formatted_msg.get("role") == "assistant" and formatted_msg.get("tool_calls") and not formatted_msg.get("content"):
+                formatted_msg["content"] = None
+                
+            formatted_messages.append(formatted_msg)
+        
         payload = {
             "model": self.model_name,
-            "messages": messages,
+            "messages": formatted_messages,
             "temperature": self.temperature,
             "stream": False
         }

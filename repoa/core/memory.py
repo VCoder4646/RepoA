@@ -153,12 +153,14 @@ class Memory:
             content: User message content
             metadata: Optional metadata
         """
-        self.chat.add_user_message(content, metadata)
+        msg = self.chat.add_user_message(content, metadata)
         self.stats["total_messages_added"] += 1
-        tokens = len(content) // 4
-        self.stats["total_tokens_processed"] += tokens
+        # tokens = len(content) // 4
+        # self.stats["total_tokens_processed"] += tokens
+    
+        self.stats["total_tokens_processed"] += msg.token_count
         
-        logger.debug(f"[{self.session_id[:8]}] User message added: {len(content)} chars, ~{tokens} tokens")
+        logger.debug(f"[{self.session_id[:8]}] User message added: {len(content)} chars, ~{msg.token_count} tokens")
         
         # Invalidate cache when new message added
         self._cache_valid = False
@@ -182,12 +184,11 @@ class Memory:
             metadata: Optional metadata
             llm_response: Optional LLM response with usage/cache data
         """
-        self.chat.add_agent_message(content, tool_calls, metadata)
+        msg=self.chat.add_agent_message(content, tool_calls, metadata)
         self.stats["total_messages_added"] += 1
-        tokens = len(content) // 4
-        self.stats["total_tokens_processed"] += tokens
+        self.stats["total_tokens_processed"] += msg.token_count
         
-        logger.debug(f"[{self.session_id[:8]}] Agent message added: {len(content)} chars, ~{tokens} tokens, tool_calls={len(tool_calls) if tool_calls else 0}")
+        logger.debug(f"[{self.session_id[:8]}] Agent message added: {len(content)} chars, ~{msg.token_count} tokens, tool_calls={len(tool_calls) if tool_calls else 0}")
         
         # Update LLM KV cache info if provided
         if llm_response:
@@ -213,12 +214,11 @@ class Memory:
             tool_call_id: ID of the tool call
             metadata: Optional metadata
         """
-        self.chat.add_tool_message(content, tool_call_id, metadata)
+        msg=self.chat.add_tool_message(content, tool_call_id, metadata)
         self.stats["total_messages_added"] += 1
-        tokens = len(content) // 4
-        self.stats["total_tokens_processed"] += tokens
+        self.stats["total_tokens_processed"] += msg.token_count
         
-        logger.debug(f"[{self.session_id[:8]}] Tool message added: tool_call_id={tool_call_id}, ~{tokens} tokens")
+        logger.debug(f"[{self.session_id[:8]}] Tool message added: tool_call_id={tool_call_id}, ~{msg.token_count} tokens")
         
         # Invalidate cache
         self._cache_valid = False

@@ -472,7 +472,7 @@ class ChatManager:
             chat_id: Chat identifier
         """
         chat = self.chats.get(chat_id)
-        if not chat:
+        if chat is None:
             raise ValueError(f"Chat not found: {chat_id}")
         
         filepath = self.storage_dir / f"{chat_id}.json"

@@ -49,7 +49,7 @@ def set_agent_logging_level(level: int) -> None:
 
 # Conditional import for Chat and Message (core dependencies)
 try:
-    from .chat import Chat, ChatManager
+    from repoa.cli.chat import Chat, ChatManager
     from .message import Message, user_message, agent_message, tool_message
     CHAT_AVAILABLE = True
 except ImportError:
@@ -244,6 +244,7 @@ class Agent:
                 metadata={"agent_name": self.agent_name}
             )
             self.chat_manager = ChatManager(storage_dir=self.config.chat_save_dir)
+            print(f'Chat save directory::::::::::::::::: {self.config.chat_save_dir}')
             # Register chat with manager
             self.chat_manager.chats[self.chat.chat_id] = self.chat
             logger.debug(f"[{self.agent_id[:8]}] Chat enabled with ID: {self.chat.chat_id}")
@@ -281,7 +282,7 @@ class Agent:
             print(f"Available tools: {self.tools_processor.list_tools()}")
             if self.llm_client:
                 print(f"LLM client configured: {self.llm_client.model_name}")
-            if self.chat:
+            if self.chat is not None:
                 print(f"Chat enabled with ID: {self.chat.chat_id}")
             if self.use_memory_cache:
                 print(f"Memory cache enabled with session: {self.memory.session_id}")
@@ -561,7 +562,7 @@ class Agent:
             self.memory.clear(keep_system=True)
         
         # Reset chat if using it
-        if self.chat:
+        if self.chat is not None:
             self.chat.clear_messages(keep_system=True)
         
         if self.config.verbose:
@@ -630,7 +631,7 @@ class Agent:
             # Memory handles system prompt internally
             return
         
-        if self.chat:
+        if self.chat is not None:
             # Chat handles system prompt internally
             return
         
@@ -691,7 +692,7 @@ class Agent:
             logger.debug(f"[{self.agent_id[:8]}] Resetting conversation history")
             if self.use_memory_cache:
                 self.memory.clear(keep_system=True)
-            elif self.chat:
+            elif self.chat is not None:
                 self.chat.clear_messages(keep_system=True)
             else:
                 self.messages.clear()
@@ -702,7 +703,7 @@ class Agent:
         # Add user message
         if self.use_memory_cache:
             self.memory.add_user_message(user_message)
-        elif self.chat:
+        elif self.chat is not None:
             self.chat.add_user_message(user_message)
         else:
             self.messages.append({"role": "user", "content": user_message})
@@ -739,7 +740,7 @@ class Agent:
             # Get messages in LLM format
             if self.use_memory_cache:
                 messages = self.memory.get_messages()
-            elif self.chat:
+            elif self.chat is not None:
                 messages = self.chat.get_messages(include_system=True)
             else:
                 messages = self.messages
@@ -787,12 +788,12 @@ class Agent:
                 
                 # Add assistant message with tool calls
                 if self.use_memory_cache:
-                    # Memory class handles tool calls differently, add as text for now
                     self.memory.add_agent_message(
-                        content=response.content or "[Tool calls requested]",
+                        content=response.content or "",
+                        tool_calls=response.tool_calls, 
                         llm_response=response.raw_response
                     )
-                elif self.chat:
+                elif self.chat is not None:
                     self.chat.add_agent_message(
                         content=response.content or "",
                         tool_calls=response.tool_calls
@@ -847,7 +848,7 @@ class Agent:
                                 content=tool_result_content,
                                 tool_call_id=tool_call.get("id", "")
                             )
-                        elif self.chat:
+                        elif self.chat is not None:
                             self.chat.add_tool_message(
                                 content=tool_result_content,
                                 tool_call_id=tool_call.get("id", "")
@@ -885,7 +886,7 @@ class Agent:
                         content=final_response,
                         llm_response=response.raw_response
                     )
-                elif self.chat:
+                elif self.chat is not None:
                     self.chat.add_agent_message(content=final_response)
                 else:
                     self.messages.append({
@@ -935,7 +936,7 @@ class Agent:
             result["cache_info"] = cache_info
         
         # Auto-save chat if enabled
-        if self.config.auto_save_chat and self.chat:
+        if self.config.auto_save_chat and self.chat is not None:
             try:
                 saved_path = self.save_chat()
                 logger.info(f"[{self.agent_id[:8]}] Chat auto-saved to: {saved_path}")
@@ -1045,6 +1046,11 @@ class Agent:
                 max_iterations=max_iterations,
                 reset_conversation=reset_conversation
             )
+
+            print("IN-MEMORY message_count:", self.chat.get_message_count())
+            print("IN-MEMORY token_count:", self.chat.get_token_count())
+            print("IN-MEMORY messages:", self.chat.get_messages())
+            print("Saved path:", self.save_chat())
             
             if return_full_response:
                 result["mode"] = "llm_with_tools"
@@ -1098,7 +1104,7 @@ class Agent:
         """Clear the conversation history (messages)."""
         if self.use_memory_cache and self.memory:
             self.memory.clear(keep_system=True)
-        elif self.chat:
+        elif self.chat is not None:
             self.chat.clear_messages(keep_system=True)
         else:
             self.messages.clear()
@@ -1133,7 +1139,7 @@ class Agent:
         Returns:
             Path to saved file or None
         """
-        if self.chat and self.chat_manager:
+        if self.chat is not None and self.chat_manager is not None:
             if storage_dir:
                 self.chat_manager.storage_dir = Path(storage_dir)
             # Ensure chat is registered with manager
@@ -1200,7 +1206,7 @@ class Agent:
         Returns:
             Chat stats dictionary or None
         """
-        if self.chat:
+        if self.chat is not None:
             return self.chat.get_stats()
         return None
     
@@ -1213,7 +1219,7 @@ class Agent:
         """
         if self.use_memory_cache and self.memory:
             return len(self.memory.chat.messages)
-        elif self.chat:
+        elif self.chat is not None:
             return self.chat.get_message_count()
         else:
             return len(self.messages)
@@ -1227,7 +1233,7 @@ class Agent:
         """
         if self.use_memory_cache and self.memory:
             return self.memory.chat.get_token_count()
-        elif self.chat:
+        elif self.chat is not None:
             return self.chat.get_token_count()
         else:
             # Estimate from messages list

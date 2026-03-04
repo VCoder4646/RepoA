@@ -161,6 +161,12 @@ class Message:
                 msg.timestamp = datetime.fromisoformat(data["timestamp"])
             except (ValueError, TypeError):
                 pass  # Keep auto-generated timestamp
+
+        if "token_count" in data:
+            try:
+                msg.token_count = int(data["token_count"])
+            except (ValueError, TypeError):
+                msg.token_count = msg._estimate_tokens()
         
         return msg
     
