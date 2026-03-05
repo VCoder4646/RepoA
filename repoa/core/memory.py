@@ -12,6 +12,7 @@ import logging
 
 from ..cli.chat import Chat, ChatManager
 from .message import user_message, agent_message, tool_message
+from .storage import BaseStorageBackend, JSONFileStorage
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class MemoryConfig:
         max_messages: Optional[int] = None,
         kv_cache_size: int = 10,
         auto_save: bool = True,
+        storage_backend: Optional[BaseStorageBackend] = None,
         storage_dir: str = ""
     ):
         """
@@ -70,7 +72,12 @@ class MemoryConfig:
         self.max_messages = max_messages
         self.kv_cache_size = kv_cache_size
         self.auto_save = auto_save
-        self.storage_dir = storage_dir
+        
+        # Initialize backend, falling back to JSON if none provided
+        if storage_backend:
+            self.storage_backend = storage_backend
+        else:
+            self.storage_backend = JSONFileStorage(storage_dir or "./agent_chats")
 
 
 class Memory:
@@ -103,7 +110,7 @@ class Memory:
         self.config = config or MemoryConfig()
         
         # Create chat manager for persistence
-        self.chat_manager = ChatManager(storage_dir=self.config.storage_dir)
+        self.chat_manager = ChatManager(storage_backend=self.config.storage_backend)
         
         # Initialize chat session
         self.chat = self.chat_manager.create_chat(
@@ -458,31 +465,25 @@ class Memory:
             Path to saved file
         """
         if not self.config.auto_save and not force:
-            logger.debug(f"[{self.session_id[:8]}] Save skipped: auto_save disabled and force=False")
+            logger.debug(f"[{self.session_id[:8]}] Save skipped")
             return ""
         
-        logger.info(f"[{self.session_id[:8]}] Saving session to disk: {len(self.chat.messages)} active messages")
+        logger.info(f"[{self.session_id[:8]}] Saving session: {len(self.chat.messages)} active messages")
         
-        # Save chat
-        self.chat_manager.save_chat(self.session_id)
+        # Save active chat
+        saved_path = self.chat_manager.save_chat(self.session_id)
         
-        # Save archived messages separately if any exist
+        # Save archived messages using the storage backend
         if self._archived_messages:
-            archive_path = Path(self.config.storage_dir) / f"{self.session_id}_archive.json"
-            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[{self.session_id[:8]}] Saving {len(self._archived_messages)} archived messages")
+            archive_data = {
+                "session_id": self.session_id,
+                "archived_at": datetime.now().isoformat(),
+                "archived_messages": self._archived_messages,
+                "stats": self.stats
+            }
+            self.chat_manager.storage.save(f"{self.session_id}_archive", archive_data)
             
-            logger.info(f"[{self.session_id[:8]}] Saving {len(self._archived_messages)} archived messages to {archive_path}")
-            
-            with open(archive_path, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "session_id": self.session_id,
-                    "archived_at": datetime.now().isoformat(),
-                    "archived_messages": self._archived_messages,
-                    "stats": self.stats
-                }, f, indent=2)
-        
-        saved_path = str(Path(self.config.storage_dir) / f"{self.session_id}.json")
-        logger.info(f"[{self.session_id[:8]}] Session saved successfully to {saved_path}")
         return saved_path
     
     def load(self, session_id: str) -> None:
@@ -494,23 +495,18 @@ class Memory:
         """
         logger.info(f"Loading session: {session_id}")
         
-        # Load chat
+        # Load active chat
         self.chat = self.chat_manager.load_chat(session_id)
         self.session_id = session_id
         
-        logger.info(f"[{self.session_id[:8]}] Session loaded: {len(self.chat.messages)} active messages")
-        
-        # Load archived messages if they exist
-        archive_path = Path(self.config.storage_dir) / f"{session_id}_archive.json"
-        if archive_path.exists():
-            logger.info(f"[{self.session_id[:8]}] Loading archived messages from {archive_path}")
-            with open(archive_path, 'r', encoding='utf-8') as f:
-                archive_data = json.load(f)
-                self._archived_messages = archive_data.get("archived_messages", [])
-                if "stats" in archive_data:
-                    self.stats.update(archive_data["stats"])
+        # Load archived messages using the storage backend
+        archive_data = self.chat_manager.storage.load(f"{session_id}_archive")
+        if archive_data:
+            self._archived_messages = archive_data.get("archived_messages", [])
+            if "stats" in archive_data:
+                self.stats.update(archive_data["stats"])
             logger.info(f"[{self.session_id[:8]}] Loaded {len(self._archived_messages)} archived messages")
-        
+            
         # Update KV cache after loading
         self._cache_valid = False
         self._update_kv_cache()
@@ -674,6 +670,7 @@ def create_memory(
     max_tokens: int = 4096,
     max_messages: Optional[int] = None,
     kv_cache_size: int = 10,
+    storage_backend: Optional['BaseStorageBackend'] = None,
     storage_dir: str = "",
     session_id: Optional[str] = None
 ) -> Memory:
@@ -698,17 +695,17 @@ def create_memory(
         max_messages=max_messages,
         kv_cache_size=kv_cache_size,
         auto_save=True,
+        storage_backend=storage_backend,
         storage_dir=storage_dir
     )
-    
-    return Memory(
-        system_prompt=system_prompt,
-        config=config,
-        session_id=session_id
-    )
+    return Memory(system_prompt=system_prompt, config=config, session_id=session_id)
 
 
-def load_memory(session_id: str, storage_dir: str = "") -> Memory:
+def load_memory(
+    session_id: str, 
+    storage_backend: Optional['BaseStorageBackend'] = None,
+    storage_dir: str = ""
+) -> Memory:
     """
     Load a memory session from disk.
     
@@ -722,8 +719,7 @@ def load_memory(session_id: str, storage_dir: str = "") -> Memory:
     logger.info(f"Loading memory from disk: session_id={session_id}, storage_dir={storage_dir}")
     
     # Create temporary memory to load the session
-    config = MemoryConfig(storage_dir=storage_dir)
+    config = MemoryConfig(storage_backend=storage_backend, storage_dir=storage_dir)
     memory = Memory(system_prompt="", config=config)  # Temporary
     memory.load(session_id)
-    
     return memory

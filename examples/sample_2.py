@@ -7,6 +7,7 @@ from repoa.config.config import Config
 from repoa.core.memory import Memory
 # 1. Update the import to use RemoteEndpointClient
 from repoa.core.llm_client import RemoteEndpointClient
+from repoa.core.storage import JSONFileStorage
 from phoenix.otel import register
 register(project_name="repoa-stock-advisor")
 
@@ -47,10 +48,11 @@ tools_orchestrator.add_tool(
         function=lambda stock_symbol: f"price of {stock_symbol}: $150 (mock data)"
     )
 )
+my_storage = JSONFileStorage(storage_dir='./agent_sample_chats')
 
 config = AgentConfig(
     auto_save_chat=True,
-    chat_save_dir='./agent_chats', 
+    storage_backend=my_storage, 
     log_level=logging.INFO,
     enable_logging=False,
     memory_log_level=logging.INFO,      

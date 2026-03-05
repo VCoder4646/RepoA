@@ -12,6 +12,7 @@ from pathlib import Path
 # from repoa.instrumentation.tracing import traced_span, OpenInferenceSpanKindValues
 from openinference.semconv.trace import OpenInferenceSpanKindValues
 from repoa.instrumentation.decorators import trace_repoa
+from .storage import BaseStorageBackend, JSONFileStorage
 
 from ..config.system_prompt import SystemPrompt
 from ..tools.tools_pro import ToolProcessor, Tool, ToolType
@@ -110,6 +111,7 @@ class AgentConfig:
         memory_log_level: int = logging.INFO,
         enable_memory_logging: bool = True,
         memory_log_file: Optional[str] = None,
+        storage_backend: Optional[BaseStorageBackend] = None,
         **additional_settings
     ):
         self.max_iterations = max_iterations
@@ -125,6 +127,7 @@ class AgentConfig:
         self.enable_memory_logging = enable_memory_logging
         self.memory_log_file = memory_log_file
         self.additional_settings = additional_settings
+        self.storage_backend = storage_backend or JSONFileStorage(self.chat_save_dir or "")
         
         # Configure logging based on settings
         if self.enable_logging:
@@ -243,7 +246,7 @@ class Agent:
                 chat_id=self.agent_id,
                 metadata={"agent_name": self.agent_name}
             )
-            self.chat_manager = ChatManager(storage_dir=self.config.chat_save_dir)
+            self.chat_manager = ChatManager(storage_backend=self.config.storage_backend)
             print(f'Chat save directory::::::::::::::::: {self.config.chat_save_dir}')
             # Register chat with manager
             self.chat_manager.chats[self.chat.chat_id] = self.chat
@@ -846,12 +849,14 @@ class Agent:
                         if self.use_memory_cache:
                             self.memory.add_tool_message(
                                 content=tool_result_content,
-                                tool_call_id=tool_call.get("id", "")
+                                tool_call_id=tool_call.get("id", ""),
+                                metadata={"name": tool_name} 
                             )
                         elif self.chat is not None:
                             self.chat.add_tool_message(
                                 content=tool_result_content,
-                                tool_call_id=tool_call.get("id", "")
+                                tool_call_id=tool_call.get("id", ""),
+                                metadata={"name": tool_name}  
                             )
                         else:
                             tool_message = {
@@ -1140,14 +1145,11 @@ class Agent:
             Path to saved file or None
         """
         if self.chat is not None and self.chat_manager is not None:
-            if storage_dir:
-                self.chat_manager.storage_dir = Path(storage_dir)
             # Ensure chat is registered with manager
             self.chat_manager.chats[self.chat.chat_id] = self.chat
             # Save using manager
             logger.info(f"[{self.agent_id[:8]}] Saving chat session: {self.chat.get_message_count()} messages")
-            self.chat_manager.save_chat(self.chat.chat_id)
-            path = str(self.chat_manager.storage_dir / f"{self.chat.chat_id}.json")
+            path = self.chat_manager.save_chat(self.chat.chat_id)
             if self.config.verbose:
                 print(f"Chat saved to: {path}")
             return path

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 
+from ..core.storage import BaseStorageBackend, JSONFileStorage
 from ..core.message import Message, Role, system_message, user_message, agent_message, tool_message
 
 
@@ -420,15 +421,14 @@ class ChatManager:
     Manages multiple chat sessions with persistence.
     """
     
-    def __init__(self, storage_dir: str = ""):
+    def __init__(self, storage_backend: Optional[BaseStorageBackend] = None):
         """
         Initialize chat manager.
         
         Args:
             storage_dir: Directory to store chat files
         """
-        self.storage_dir = Path(storage_dir)
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.storage = storage_backend or JSONFileStorage("./agent_chats")
         self.chats: Dict[str, Chat] = {}
     
     def create_chat(
@@ -464,19 +464,14 @@ class ChatManager:
         """
         return self.chats.get(chat_id)
     
-    def save_chat(self, chat_id: str) -> None:
-        """
-        Save a chat to disk.
-        
-        Args:
-            chat_id: Chat identifier
-        """
+    def save_chat(self, chat_id: str) -> str:
+        """Save a chat using the storage backend."""
         chat = self.chats.get(chat_id)
         if chat is None:
             raise ValueError(f"Chat not found: {chat_id}")
         
-        filepath = self.storage_dir / f"{chat_id}.json"
-        chat.save(str(filepath))
+       
+        return self.storage.save(chat_id, chat.to_dict())
     
     def load_chat(self, chat_id: str) -> Chat:
         """
@@ -488,8 +483,11 @@ class ChatManager:
         Returns:
             Loaded Chat instance
         """
-        filepath = self.storage_dir / f"{chat_id}.json"
-        chat = Chat.load(str(filepath))
+        data = self.storage.load(chat_id)
+        if data is None:
+            raise FileNotFoundError(f"Chat session not found: {chat_id}")
+            
+        chat = Chat.from_dict(data)
         self.chats[chat.chat_id] = chat
         return chat
     
@@ -500,8 +498,7 @@ class ChatManager:
         Returns:
             List of chat IDs
         """
-        chat_files = self.storage_dir.glob("chat_*.json")
-        return [f.stem for f in chat_files]
+        return self.storage.list_sessions()
     
     def delete_chat(self, chat_id: str) -> None:
         """
@@ -510,15 +507,10 @@ class ChatManager:
         Args:
             chat_id: Chat identifier
         """
-        # Remove from memory
         if chat_id in self.chats:
             del self.chats[chat_id]
-        
-        # Remove from disk
-        filepath = self.storage_dir / f"{chat_id}.json"
-        if filepath.exists():
-            filepath.unlink()
+        self.storage.delete(chat_id)
     
     def __repr__(self) -> str:
         """String representation."""
-        return f"ChatManager(chats={len(self.chats)}, storage={self.storage_dir})"
+        return f"ChatManager(chats={len(self.chats)}, storage={self.storage.__class__.__name__})"
